@@ -18,7 +18,7 @@ import pytest
 from hypothesis import HealthCheck, settings
 
 from finagentic.domain.concepts import Concept, PeriodKind, meta
-from finagentic.domain.facts import SCALE_MILLIONS, FinancialFact, Provenance
+from finagentic.domain.facts import SCALE_MILLIONS, FinancialFact, PdfProvenance
 from finagentic.domain.ledger import FactSet
 from finagentic.domain.periods import FiscalPeriod, Period
 
@@ -48,8 +48,8 @@ def doc_id() -> UUID:
     return DOC_ID
 
 
-def make_provenance(row_label: str, page: int = 1, raw_text: str | None = None) -> Provenance:
-    return Provenance(
+def make_provenance(row_label: str, page: int = 1, raw_text: str | None = None) -> PdfProvenance:
+    return PdfProvenance(
         document_id=DOC_ID,
         page=page,
         raw_text=raw_text or row_label,
@@ -64,12 +64,10 @@ def make_fact(
     raw_value: Decimal | int | str,
     *,
     scale: Decimal = SCALE_MILLIONS,
-    document_id: UUID = DOC_ID,
     entity_id: UUID = ENTITY_ID,
 ) -> FinancialFact:
-    """Build a fact the way the extractor would, with normalisation applied."""
+    """Build a fact the way an adapter would, with normalisation applied."""
     return FinancialFact.from_reported(
-        document_id=document_id,
         entity_id=entity_id,
         concept=concept,
         period=period,
@@ -123,6 +121,10 @@ INCOME_STATEMENT: dict[Concept, str] = {
     Concept.PRETAX_INCOME: "2050",
     Concept.INCOME_TAX_EXPENSE: "450",
     Concept.NET_INCOME: "1600",
+    # Reported explicitly so the net income check takes its strict path, as it
+    # does for any filer with consolidated subsidiaries. Zero here means the
+    # parent owns them outright.
+    Concept.NET_INCOME_TO_NCI: "0",
     Concept.NET_INCOME_TO_COMMON: "1600",
 }
 

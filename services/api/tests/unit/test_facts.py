@@ -21,7 +21,7 @@ from finagentic.domain.facts import (
     SCALE_UNITS,
     FactStatus,
     FinancialFact,
-    Provenance,
+    PdfProvenance,
 )
 from finagentic.domain.periods import FiscalPeriod, Period
 from tests.conftest import DOC_ID, ENTITY_ID, make_fact, make_provenance
@@ -51,7 +51,6 @@ def test_scale_is_exact_for_fractional_values(fy2024):
 def test_an_unrecognised_scale_is_rejected(fy2024):
     with pytest.raises(ValidationError, match="scale"):
         FinancialFact(
-            document_id=DOC_ID,
             entity_id=ENTITY_ID,
             concept=Concept.REVENUE,
             period=fy2024,
@@ -118,7 +117,6 @@ def test_a_magnitude_concept_cannot_be_constructed_negative(fy2024):
     """Bypassing from_reported must not be able to smuggle in a bad sign."""
     with pytest.raises(ValidationError, match="MAGNITUDE"):
         FinancialFact(
-            document_id=DOC_ID,
             entity_id=ENTITY_ID,
             concept=Concept.CAPITAL_EXPENDITURES,
             period=fy2024,
@@ -136,7 +134,6 @@ def test_value_must_be_consistent_with_raw_value_and_scale(fy2024):
     rejected -- there is no way to store a number that is not derivable."""
     with pytest.raises(ValidationError, match="does not equal"):
         FinancialFact(
-            document_id=DOC_ID,
             entity_id=ENTITY_ID,
             concept=Concept.REVENUE,
             period=fy2024,
@@ -172,7 +169,6 @@ def test_an_instant_concept_rejects_a_duration_period(fy2024):
 def test_provenance_is_required(fy2024):
     with pytest.raises(ValidationError):
         FinancialFact(
-            document_id=DOC_ID,
             entity_id=ENTITY_ID,
             concept=Concept.REVENUE,
             period=fy2024,
@@ -186,7 +182,7 @@ def test_provenance_is_required(fy2024):
 def test_provenance_rejects_an_empty_quotation():
     """An extractor that cannot quote its source cannot record a fact."""
     with pytest.raises(ValidationError):
-        Provenance(
+        PdfProvenance(
             document_id=DOC_ID,
             page=1,
             raw_text="",
@@ -197,7 +193,7 @@ def test_provenance_rejects_an_empty_quotation():
 
 def test_provenance_rejects_an_empty_row_label():
     with pytest.raises(ValidationError):
-        Provenance(
+        PdfProvenance(
             document_id=DOC_ID,
             page=1,
             raw_text="10,000",
@@ -208,7 +204,7 @@ def test_provenance_rejects_an_empty_row_label():
 
 def test_page_numbers_are_one_indexed():
     with pytest.raises(ValidationError):
-        Provenance(
+        PdfProvenance(
             document_id=DOC_ID,
             page=0,
             raw_text="10,000",

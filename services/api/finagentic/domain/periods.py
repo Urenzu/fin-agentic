@@ -110,9 +110,27 @@ class Period(BaseModel):
         return f"{self.fiscal_period.value} {self.fiscal_year}"
 
     @property
-    def key(self) -> tuple[int, str, str]:
-        """Stable identity used to group facts describing the same period."""
-        return (self.fiscal_year, self.fiscal_period.value, self.kind.value)
+    def key(self) -> tuple[str, str | None, str]:
+        """Stable identity used to group facts describing the same period.
+
+        Keyed on the actual dates rather than the fiscal label, because the
+        label is not a reliable identifier of what a value measures. EDGAR's
+        `fy`/`fp` fields describe the *filing* a value appeared in, not the
+        period the value covers: a 10-K for fiscal 2009 carries its comparative
+        prior-year balance sheet tagged `fy=2009` with an end date in 2008.
+        Keying on the label collapses those two distinct balance sheets into one
+        slot, where they then look like contradictory values for the same date.
+
+        The same date reported under different labels -- a 30 September balance
+        sheet appearing as `FY` in the annual report and as `Q1` in the next
+        quarterly -- is genuinely the same balance sheet, and keying on dates
+        correctly merges rather than duplicates it.
+        """
+        return (
+            self.kind.value,
+            self.start_date.isoformat() if self.start_date else None,
+            self.end_date.isoformat(),
+        )
 
     def is_comparable_to(self, other: Period) -> bool:
         """True when two periods measure spans of the same type and length.

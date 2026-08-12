@@ -151,6 +151,39 @@ def _compare_subtotal(
     involved = [total, *components]
 
     if delta > tol:
+        # Before calling an overshoot a contradiction, check whether exactly one
+        # component is redundant with another. Filers routinely report both an
+        # aggregate and its parts -- SG&A alongside separate sales-and-marketing
+        # and G&A lines, or an accrued-liabilities breakout already contained in
+        # other current liabilities. Both tag onto distinct concepts, so the
+        # naive sum double-counts.
+        #
+        # If removing a single component lands the identity within tolerance,
+        # that component was double-counted rather than wrong. Requiring an exact
+        # landing makes a coincidental rescue implausible: the tolerance is a
+        # fraction of a percent of the total, so a component would have to match
+        # the overshoot almost exactly to qualify.
+        redundant = _find_redundant_component(components, expected, tol)
+        if redundant is not None:
+            kept = [f for f in components if f.id != redundant.id]
+            return CheckResult(
+                check_id=check_id,
+                identity=identity,
+                status=CheckStatus.PASSED,
+                severity=severity,
+                period_label=period.label,
+                expected=expected,
+                actual=sum((f.value for f in kept), Decimal(0)),
+                delta=Decimal(0),
+                tolerance=tol,
+                fact_ids=tuple(f.id for f in involved),
+                message=(
+                    f"{identity} holds once {redundant.concept.value} is excluded: "
+                    f"its value is already contained in another line item, so "
+                    f"counting both would double-count it."
+                ),
+            )
+
         status, message = (
             CheckStatus.FAILED,
             f"{identity} is contradicted: the components sum to {actual}, which "
@@ -179,6 +212,26 @@ def _compare_subtotal(
         fact_ids=tuple(f.id for f in involved),
         message=message,
     )
+
+
+def _find_redundant_component(
+    components: Sequence[FinancialFact],
+    expected: Decimal,
+    tolerance: Decimal,
+) -> FinancialFact | None:
+    """Find the single component whose removal makes the subtotal reconcile.
+
+    Returns None when no single removal works, which is the case for a genuine
+    contradiction. Only single-component removal is considered: allowing
+    arbitrary subsets would make it easy to "explain" any discrepancy, which
+    would defeat the purpose of the check.
+    """
+    total = sum((f.value for f in components), Decimal(0))
+    matches = [f for f in components if abs(total - f.value - expected) <= tolerance]
+    # Ambiguous rescues are refused. If two different components could each
+    # explain the overshoot, we cannot tell which is genuinely redundant, and
+    # guessing risks silently dropping a real line item.
+    return matches[0] if len(matches) == 1 else None
 
 
 def _tolerance_for(facts: Sequence[FinancialFact], terms: int | None = None) -> ToleranceModel:
@@ -496,13 +549,9 @@ def check_operating_expense_subtotal(facts: FactSet, period: Period) -> CheckRes
     if not found:
         return _skipped("is.opex_subtotal", identity, Severity.WARNING, period, components)
 
-    # SG&A and its S&M / G&A decomposition are alternative presentations of the
-    # same spend. Summing all three double-counts, so drop the aggregate when
-    # both components are present.
-    present = {f.concept for f in found}
-    if {Concept.SALES_AND_MARKETING, Concept.GENERAL_AND_ADMIN} <= present:
-        found = [f for f in found if f.concept is not Concept.SELLING_GENERAL_ADMIN]
-
+    # SG&A reported alongside its separate S&M and G&A components is handled by
+    # the redundancy detection in _compare_subtotal, along with every other
+    # aggregate-plus-parts presentation.
     return _compare_subtotal(
         check_id="is.opex_subtotal",
         identity=identity,
@@ -515,26 +564,53 @@ def check_operating_expense_subtotal(facts: FactSet, period: Period) -> CheckRes
 
 
 def check_net_income(facts: FactSet, period: Period) -> CheckResult | None:
-    """Net income = pre-tax income - tax expense."""
+    """Consolidated net income = pre-tax income - tax expense.
+
+    The subtraction yields income *including* the non-controlling interest
+    share, not income attributable to the parent. For a company with
+    consolidated subsidiaries it does not wholly own, those differ by the NCI
+    portion -- materially so for the likes of Coca-Cola and Walmart. Checking
+    against parent-only net income would report a break on every such period
+    while the filing is entirely correct.
+    """
     if period.kind is not PeriodKind.DURATION:
         return None
 
-    identity = "Net income = pre-tax income - income tax expense"
-    required = (Concept.PRETAX_INCOME, Concept.INCOME_TAX_EXPENSE, Concept.NET_INCOME)
+    identity = "Consolidated net income = pre-tax income - income tax expense"
+    required = (Concept.PRETAX_INCOME, Concept.INCOME_TAX_EXPENSE)
     found, missing = _fetch(facts, period, required)
     if missing:
         return _skipped("is.net_income", identity, Severity.WARNING, period, missing)
 
-    pretax, tax, net = found
+    pretax, tax = found
+
+    # Prefer the explicitly-reported consolidated figure. Failing that,
+    # reconstruct it from parent net income plus the NCI share.
+    absent: tuple[Concept, ...] = ()
+    consolidated = facts.get(Concept.NET_INCOME_INCLUDING_NCI, period)
+    if consolidated is not None:
+        income_facts = [consolidated]
+        expected = consolidated.value
+    else:
+        parent = facts.get(Concept.NET_INCOME, period)
+        if parent is None:
+            return _skipped("is.net_income", identity, Severity.WARNING, period, [Concept.NET_INCOME])
+        nci = facts.get(Concept.NET_INCOME_TO_NCI, period)
+        income_facts = [parent] + ([nci] if nci else [])
+        expected = parent.value + (nci.value if nci else Decimal(0))
+        absent = () if nci else (Concept.NET_INCOME_TO_NCI,)
+
+    involved = [pretax, tax, *income_facts]
     return _compare(
         check_id="is.net_income",
         identity=identity,
         severity=Severity.WARNING,
         period=period,
-        expected=net.value,
+        expected=expected,
         actual=pretax.value - tax.value,
-        facts=found,
-        tolerance=_tolerance_for(found, terms=3),
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=3),
+        absent_optional=absent,
     )
 
 

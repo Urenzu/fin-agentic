@@ -25,7 +25,7 @@ class FactSet:
     def __init__(self, facts: Iterable[FinancialFact] = ()) -> None:
         self._facts: tuple[FinancialFact, ...] = tuple(facts)
         self._by_key: dict[FactKey, list[FinancialFact]] = {}
-        self._by_period: dict[tuple[int, str, str], list[FinancialFact]] = {}
+        self._by_period: dict[tuple[str, str | None, str], list[FinancialFact]] = {}
         for fact in self._facts:
             self._by_key.setdefault(FactKey.of(fact), []).append(fact)
             self._by_period.setdefault(fact.period.key, []).append(fact)
@@ -114,7 +114,7 @@ class FactSet:
 
     def periods(self) -> list[Period]:
         """Distinct periods present, ordered chronologically."""
-        seen: dict[tuple[int, str, str], Period] = {}
+        seen: dict[tuple[str, str | None, str], Period] = {}
         for fact in self._facts:
             seen.setdefault(fact.period.key, fact.period)
         return sorted(seen.values(), key=lambda p: (p.end_date, p.fiscal_period.months))

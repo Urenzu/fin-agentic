@@ -78,7 +78,17 @@ class Concept(StrEnum):
     OTHER_NONOPERATING_INCOME = "OtherNonoperatingIncomeExpense"
     PRETAX_INCOME = "IncomeLossBeforeIncomeTaxes"
     INCOME_TAX_EXPENSE = "IncomeTaxExpenseBenefit"
+    #: Net income attributable to the parent. This is the "net income" a reader
+    #: means, and the numerator of EPS.
     NET_INCOME = "NetIncomeLoss"
+    #: Consolidated net income including the share owned by non-controlling
+    #: interests. Distinct from NET_INCOME, and the two differ materially for any
+    #: company with consolidated subsidiaries it does not wholly own. This is the
+    #: figure that equals pre-tax income less tax.
+    NET_INCOME_INCLUDING_NCI = "ProfitLoss"
+    #: The portion of consolidated net income belonging to non-controlling
+    #: interests: NET_INCOME_INCLUDING_NCI - NET_INCOME.
+    NET_INCOME_TO_NCI = "NetIncomeLossAttributableToNoncontrollingInterest"
     NET_INCOME_TO_COMMON = "NetIncomeLossAvailableToCommonStockholdersBasic"
     EPS_BASIC = "EarningsPerShareBasic"
     EPS_DILUTED = "EarningsPerShareDiluted"
@@ -194,6 +204,8 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
     Concept.PRETAX_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Income before income taxes", is_subtotal=True),
     Concept.INCOME_TAX_EXPENSE: ConceptMeta(_IS, _D, _R, Unit.USD, "Income tax expense"),
     Concept.NET_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income", is_subtotal=True),
+    Concept.NET_INCOME_INCLUDING_NCI: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income including non-controlling interests", is_subtotal=True),
+    Concept.NET_INCOME_TO_NCI: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income attributable to non-controlling interests"),
     Concept.NET_INCOME_TO_COMMON: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income to common"),
     Concept.EPS_BASIC: ConceptMeta(_IS, _D, _R, Unit.USD_PER_SHARE, "Basic EPS"),
     Concept.EPS_DILUTED: ConceptMeta(_IS, _D, _R, Unit.USD_PER_SHARE, "Diluted EPS"),

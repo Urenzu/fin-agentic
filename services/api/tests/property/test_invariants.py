@@ -31,7 +31,7 @@ from finagentic.domain.facts import (
 from finagentic.domain.ledger import FactSet
 from finagentic.domain.periods import FiscalPeriod, Period
 from finagentic.validation.engine import validate
-from tests.conftest import DOC_ID, ENTITY_ID, build_clean_filing, make_provenance
+from tests.conftest import ENTITY_ID, build_clean_filing, make_provenance
 
 # Money as it appears in a filing: bounded magnitude, at most two decimals.
 reported_values = st.decimals(
@@ -82,7 +82,6 @@ def _instant(year: int = 2024) -> Period:
 
 def _build(concept: Concept, period: Period, raw: Decimal, scale: Decimal) -> FinancialFact:
     return FinancialFact.from_reported(
-        document_id=DOC_ID,
         entity_id=ENTITY_ID,
         concept=concept,
         period=period,

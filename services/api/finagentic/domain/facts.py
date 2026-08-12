@@ -16,10 +16,10 @@ Design rules enforced here, at construction time, rather than by convention:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Self
+from typing import Annotated, Literal, Self
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -83,10 +83,67 @@ class BoundingBox(BaseModel):
         return self
 
 
-class Provenance(BaseModel):
-    """Where a fact came from, precisely enough to highlight it in the source."""
+class SourceKind(StrEnum):
+    """Which kind of source a fact was drawn from.
 
+    The two differ in how precisely a value can be located, and in how much
+    interpretation stood between the source and the ledger:
+
+    XBRL  the filer tagged the value themselves as part of their SEC
+          submission. Nothing interpreted it, so there is no extraction step and
+          no extraction error. Located to a filing (accession number).
+    PDF   a value read off a rendered page. Located to a page and, where the
+          extractor supplied one, a bounding box. Carries extraction risk, which
+          is what the validation layer exists to bound.
+    """
+
+    XBRL = "xbrl"
+    PDF = "pdf"
+
+
+class ProvenanceBase(BaseModel):
     model_config = ConfigDict(frozen=True)
+
+    #: Identifier of the producer, e.g. "llm:claude-opus-5" or "edgar:companyfacts".
+    #: Lets a bad producer version be located and its facts revoked.
+    extractor: str = Field(min_length=1)
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class XbrlProvenance(ProvenanceBase):
+    """A fact taken from a filer's own XBRL submission."""
+
+    source: Literal[SourceKind.XBRL] = SourceKind.XBRL
+
+    #: SEC accession number, e.g. "0000320193-25-000079". Identifies the exact
+    #: filing, which is what makes a restatement traceable: the same period can
+    #: legitimately carry different values across accessions.
+    accession: str = Field(pattern=r"^\d{10}-\d{2}-\d{6}$")
+    #: Central Index Key of the filer.
+    cik: int = Field(ge=1)
+    #: The us-gaap tag as submitted, before mapping onto a canonical Concept.
+    #: Retained because filers change tags over time, and the original tag is the
+    #: only way to audit a mapping decision after the fact.
+    tag: str = Field(min_length=1)
+    #: Form the value was reported on, e.g. "10-K" or "10-Q".
+    form: str = Field(min_length=1)
+    #: Date the filing was submitted. Used to prefer the most recent statement of
+    #: a restated figure.
+    filed: date
+
+    @property
+    def filing_url(self) -> str:
+        """Canonical sec.gov URL for the filing this fact came from."""
+        return (
+            f"https://www.sec.gov/Archives/edgar/data/{self.cik}/"
+            f"{self.accession.replace('-', '')}/{self.accession}-index.htm"
+        )
+
+
+class PdfProvenance(ProvenanceBase):
+    """A fact read off a rendered document page."""
+
+    source: Literal[SourceKind.PDF] = SourceKind.PDF
 
     document_id: UUID
     #: 1-indexed page number as a reader would count it.
@@ -100,19 +157,21 @@ class Provenance(BaseModel):
     #: The column header the value sat under, as printed.
     column_header: str | None = None
     bbox: BoundingBox | None = None
-    #: Identifier of the extractor that produced this fact, e.g. "llm:claude-opus-5"
-    #: or "xbrl:us-gaap". Lets a bad extractor version be found and revoked.
-    extractor: str = Field(min_length=1)
-    extracted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+#: A fact's origin. Discriminated on `source`, so adding a third adapter (XLSX,
+#: OCR) means a new member here rather than a pile of nullable fields on one
+#: shared model -- which is what keeps "every fact has provenance" enforceable
+#: rather than aspirational.
+Provenance = Annotated[XbrlProvenance | PdfProvenance, Field(discriminator="source")]
 
 
 class FinancialFact(BaseModel):
-    """One number, from one document, for one concept and one period."""
+    """One number, from one source, for one concept and one period."""
 
     model_config = ConfigDict(frozen=True)
 
     id: UUID = Field(default_factory=uuid4)
-    document_id: UUID
     entity_id: UUID
     concept: Concept
     period: Period
@@ -193,7 +252,6 @@ class FinancialFact(BaseModel):
     def from_reported(
         cls,
         *,
-        document_id: UUID,
         entity_id: UUID,
         concept: Concept,
         period: Period,
@@ -202,9 +260,9 @@ class FinancialFact(BaseModel):
         provenance: Provenance,
         confidence: float = 1.0,
     ) -> FinancialFact:
-        """Build a fact from a value as printed, applying normalisation.
+        """Build a fact from a value as reported, applying normalisation.
 
-        This is the only constructor extraction code should use: it derives
+        This is the only constructor ingestion code should use: it derives
         `value`, `sign_flipped` and `unit` from the concept registry so the
         normalisation rules live in exactly one place.
         """
@@ -212,7 +270,6 @@ class FinancialFact(BaseModel):
         magnitude = abs(raw_value) if cm.sign is SignConvention.MAGNITUDE else raw_value
         value = magnitude * scale
         return cls(
-            document_id=document_id,
             entity_id=entity_id,
             concept=concept,
             period=period,
@@ -229,6 +286,17 @@ class FinancialFact(BaseModel):
     def is_usable(self) -> bool:
         """Whether analytics and the chat agent may quote this fact."""
         return self.status is FactStatus.VERIFIED
+
+    @property
+    def source_id(self) -> str:
+        """Stable identifier of the source this fact came from.
+
+        The accession number for XBRL, the document id for a PDF. Used to group
+        facts by origin and to prefer one source over another during
+        reconciliation.
+        """
+        p = self.provenance
+        return p.accession if isinstance(p, XbrlProvenance) else str(p.document_id)
 
     def with_status(self, status: FactStatus) -> FinancialFact:
         """Return a copy carrying `status`. Facts are frozen; verification
@@ -248,7 +316,7 @@ class FactKey(BaseModel):
 
     entity_id: UUID
     concept: Concept
-    period_key: tuple[int, str, str]
+    period_key: tuple[str, str | None, str]
 
     @classmethod
     def of(cls, fact: FinancialFact) -> FactKey:
