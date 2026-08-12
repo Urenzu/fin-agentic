@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid5
 
@@ -68,6 +69,13 @@ _NOMINAL_SPANS: tuple[tuple[FiscalPeriod, int], ...] = (
 )
 
 
+#: A registrant filing less than this much history is almost certainly not the
+#: entity the user meant. Set just above two years so a genuine recent IPO is
+#: flagged too -- in that case the flag is still correct, since there really is
+#: no long history to analyse.
+MIN_EXPECTED_HISTORY_YEARS = 2.5
+
+
 @dataclass(frozen=True, slots=True)
 class AdaptationReport:
     """What happened during adaptation, so gaps are visible rather than implied."""
@@ -80,10 +88,41 @@ class AdaptationReport:
     skipped_unresolvable_period: int = 0
     superseded_by_restatement: int = 0
     conflicting_tags_resolved: int = 0
+    earliest: date | None = None
+    latest: date | None = None
+    annual_reports: int = 0
+
+    @property
+    def history_years(self) -> float:
+        if self.earliest is None or self.latest is None:
+            return 0.0
+        return (self.latest - self.earliest).days / 365.25
+
+    @property
+    def looks_truncated(self) -> bool:
+        """Whether this ledger is too thin to be the company the user meant.
+
+        A ticker resolves to whichever CIK currently holds it. After a corporate
+        reorganisation that is the new holding company, whose history begins at
+        the reorganisation -- so `XOM` returns a few months of data while the
+        decades of Exxon Mobil filings sit under the predecessor CIK.
+
+        Returning that quietly would be the exact failure this system exists to
+        prevent: not a wrong number, but a confident-looking answer built on
+        almost no data. Callers must surface this rather than render a chart.
+        """
+        return self.history_years < MIN_EXPECTED_HISTORY_YEARS or self.annual_reports == 0
 
     def summary(self) -> str:
+        span = (
+            f"{self.earliest} to {self.latest} ({self.history_years:.1f}y, "
+            f"{self.annual_reports} annual reports)"
+            if self.earliest
+            else "no dated facts"
+        )
+        warning = "  ** HISTORY LOOKS TRUNCATED **" if self.looks_truncated else ""
         return (
-            f"{self.accepted} facts accepted; skipped "
+            f"{self.accepted} facts accepted covering {span}; skipped "
             f"{self.skipped_unmapped_tag} unmapped-tag, "
             f"{self.skipped_dimensional} dimensional, "
             f"{self.skipped_unsupported_unit} unsupported-unit, "
@@ -91,6 +130,7 @@ class AdaptationReport:
             f"{self.skipped_unresolvable_period} unresolvable-period; "
             f"{self.superseded_by_restatement} superseded by restatement, "
             f"{self.conflicting_tags_resolved} tag conflicts resolved"
+            f"{warning}"
         )
 
 
@@ -228,7 +268,19 @@ def to_facts(
         facts.append(_build_fact(winner, entity_id))
         counters["accepted"] += 1
 
+    end_dates = [f.period.end_date for f in facts]
+    annual = sum(
+        1
+        for f in facts
+        if f.period.fiscal_period is FiscalPeriod.FY
+        and f.period.kind is PeriodKind.DURATION
+        and f.concept is Concept.REVENUE
+    )
+
     report = AdaptationReport(
+        earliest=min(end_dates) if end_dates else None,
+        latest=max(end_dates) if end_dates else None,
+        annual_reports=annual,
         accepted=counters["accepted"],
         skipped_unmapped_tag=counters["skipped_unmapped_tag"],
         skipped_dimensional=counters["skipped_dimensional"],

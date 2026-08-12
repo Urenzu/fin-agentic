@@ -189,12 +189,38 @@ class EdgarClient:
         return registrants
 
     def lookup(self, ticker: str) -> Registrant:
-        """Resolve a ticker to its registrant, or raise UnknownTickerError."""
+        """Resolve a ticker to its registrant, or raise UnknownTickerError.
+
+        Note that a ticker resolves to whichever CIK *currently* holds it, which
+        is not necessarily the entity carrying the operating history. After a
+        reorganisation the ticker moves to the new holding company, whose filing
+        history starts at the reorganisation date -- `XOM` resolves to
+        "ExxonMobil Holdings Corp" (CIK 2115436, one quarter of history) rather
+        than "Exxon Mobil Corporation" (CIK 34088, filings back to 2008).
+
+        Callers should check `AdaptationReport.looks_truncated` on the resulting
+        ledger, or use `registrant_for_cik` to address a predecessor directly.
+        """
         registrants = self._load_tickers()
         try:
             return registrants[ticker.strip().upper()]
         except KeyError:
             raise UnknownTickerError(ticker) from None
+
+    def registrant_for_cik(self, cik: int, ticker: str = "") -> Registrant:
+        """Address a registrant by CIK, bypassing the ticker map.
+
+        Needed to reach entities that no longer hold a ticker: predecessors of a
+        reorganisation, and companies since acquired or delisted. Their filing
+        history remains on EDGAR and is often the history a user actually wants.
+        """
+        probe = Registrant(cik=cik, ticker=ticker.upper(), name="")
+        payload = self.company_facts(probe)
+        return Registrant(
+            cik=cik,
+            ticker=ticker.upper(),
+            name=str(payload.get("entityName", "")),
+        )
 
     def search(self, query: str, limit: int = 10) -> list[Registrant]:
         """Find registrants whose ticker or name matches `query`."""
