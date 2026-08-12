@@ -33,6 +33,7 @@ Two properties carry most of the weight:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace as _replace
 from enum import StrEnum
 
 
@@ -175,6 +176,9 @@ class ConceptMeta:
     #: True when the concept is a subtotal derivable from other concepts. Subtotals
     #: are recomputed by the validation layer rather than trusted on extraction.
     is_subtotal: bool = False
+    #: How deeply the line is indented when rendered. 0 is a top-level line or
+    #: subtotal; 1 is a component rolling up into the subtotal below it.
+    indent: int = 0
 
 
 _M = SignConvention.MAGNITUDE
@@ -203,9 +207,9 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
     Concept.OTHER_NONOPERATING_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Other non-operating income"),
     Concept.PRETAX_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Income before income taxes", is_subtotal=True),
     Concept.INCOME_TAX_EXPENSE: ConceptMeta(_IS, _D, _R, Unit.USD, "Income tax expense"),
-    Concept.NET_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income", is_subtotal=True),
     Concept.NET_INCOME_INCLUDING_NCI: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income including non-controlling interests", is_subtotal=True),
     Concept.NET_INCOME_TO_NCI: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income attributable to non-controlling interests"),
+    Concept.NET_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income", is_subtotal=True),
     Concept.NET_INCOME_TO_COMMON: ConceptMeta(_IS, _D, _R, Unit.USD, "Net income to common"),
     Concept.EPS_BASIC: ConceptMeta(_IS, _D, _R, Unit.USD_PER_SHARE, "Basic EPS"),
     Concept.EPS_DILUTED: ConceptMeta(_IS, _D, _R, Unit.USD_PER_SHARE, "Diluted EPS"),
@@ -281,14 +285,67 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
 }
 
 
+#: Lines that sit flush left despite not being subtotals. Everything else that
+#: is not a subtotal is a component rolling up into the subtotal beneath it, and
+#: is indented one level.
+#:
+#: These are the exceptions because they are headline lines in their own right:
+#: the top of the income statement, the below-the-line items between operating
+#: income and net income, the per-share block, and the cash reconciliation
+#: lines, none of which belong to a subtotal above them.
+_FLUSH_LEFT: frozenset[Concept] = frozenset(
+    {
+        Concept.REVENUE,
+        Concept.COST_OF_REVENUE,
+        Concept.INTEREST_EXPENSE,
+        Concept.INTEREST_INCOME,
+        Concept.OTHER_NONOPERATING_INCOME,
+        Concept.INCOME_TAX_EXPENSE,
+        Concept.NET_INCOME_TO_NCI,
+        Concept.NET_INCOME_TO_COMMON,
+        Concept.EPS_BASIC,
+        Concept.EPS_DILUTED,
+        Concept.SHARES_BASIC,
+        Concept.SHARES_DILUTED,
+        Concept.FX_EFFECT_ON_CASH,
+        Concept.CASH_BEGINNING_OF_PERIOD,
+        Concept.CASH_END_OF_PERIOD,
+    }
+)
+
+# Indentation is derived rather than declared per entry: a line is indented if
+# and only if it is a component feeding a subtotal. Deriving it keeps the rule
+# visible and stops the registry drifting into 85 hand-maintained integers that
+# disagree with each other.
+CONCEPT_META = {
+    concept: (
+        m
+        if m.is_subtotal or concept in _FLUSH_LEFT
+        else _replace(m, indent=1)
+    )
+    for concept, m in CONCEPT_META.items()
+}
+
+
 def meta(concept: Concept) -> ConceptMeta:
     """Return metadata for `concept`."""
     return CONCEPT_META[concept]
 
 
 def concepts_for(statement: Statement) -> list[Concept]:
-    """Return every concept belonging to `statement`, in declaration order."""
+    """Return every concept belonging to `statement`, in declaration order.
+
+    Declaration order in `CONCEPT_META` *is* the display order: the registry is
+    written top-to-bottom in the order a reader expects to see the lines, so a
+    statement view can render it directly without a parallel ordering table to
+    keep in sync.
+    """
     return [c for c, m in CONCEPT_META.items() if m.statement == statement]
+
+
+def statement_layout(statement: Statement) -> list[tuple[Concept, ConceptMeta]]:
+    """Concepts for `statement` in render order, with their display metadata."""
+    return [(c, m) for c, m in CONCEPT_META.items() if m.statement == statement]
 
 
 # Guard against the registry drifting out of sync with the enum. A concept without
