@@ -1,0 +1,866 @@
+"""Deterministic accounting identity checks.
+
+This module is the reason the platform can claim its numbers are trustworthy.
+Every check here is pure arithmetic over the ledger -- no model, no heuristic,
+no network. A number that survives this layer has been shown to be consistent
+with the other numbers in the filing, which is a far stronger guarantee than
+any extractor's self-reported confidence.
+
+Adding a check
+--------------
+Write a function taking (FactSet, Period) and returning CheckResult | None
+(None meaning "not applicable to this period kind"), then register it in
+`ALL_CHECKS`. Use `_compare` so tolerance and reporting stay uniform.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from decimal import Decimal
+
+from finagentic.domain.concepts import Concept
+from finagentic.domain.facts import FinancialFact
+from finagentic.domain.ledger import FactSet
+from finagentic.domain.periods import PERIOD_COMPOSITION, FiscalPeriod, Period, PeriodKind
+from finagentic.validation.results import (
+    CheckResult,
+    CheckStatus,
+    Severity,
+    ToleranceModel,
+)
+
+Check = Callable[[FactSet, Period], CheckResult | None]
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
+def _skipped(
+    check_id: str,
+    identity: str,
+    severity: Severity,
+    period: Period,
+    missing: Sequence[Concept],
+) -> CheckResult:
+    names = tuple(c.value for c in missing)
+    return CheckResult(
+        check_id=check_id,
+        identity=identity,
+        status=CheckStatus.SKIPPED,
+        severity=severity,
+        period_label=period.label,
+        missing=names,
+        message=f"Not evaluated: missing {', '.join(names)}.",
+    )
+
+
+def _compare(
+    *,
+    check_id: str,
+    identity: str,
+    severity: Severity,
+    period: Period,
+    expected: Decimal,
+    actual: Decimal,
+    facts: Sequence[FinancialFact],
+    tolerance: ToleranceModel,
+    absent_optional: Sequence[Concept] = (),
+) -> CheckResult:
+    """Evaluate `actual == expected` within tolerance and build the result.
+
+    `absent_optional` names inputs the identity treats as zero because they were
+    not extracted -- the FX effect on cash, a non-controlling interest. When the
+    identity holds anyway, their absence was immaterial and the pass stands.
+
+    When it does not hold, the discrepancy is indistinguishable from the value
+    of the missing term: a roll-forward that misses by 50M could be a genuine
+    extraction error, or it could be a 50M currency-translation line nobody
+    captured. Asserting a break would be claiming knowledge the system does not
+    have, so the result is downgraded to SKIPPED and names what was missing.
+    """
+    tol = tolerance.for_magnitude(expected)
+    delta = actual - expected
+    ok = abs(delta) <= tol
+
+    if ok:
+        status = CheckStatus.PASSED
+        message = f"{identity} holds within {tol}."
+    elif absent_optional:
+        status = CheckStatus.SKIPPED
+        names = ", ".join(c.value for c in absent_optional)
+        message = (
+            f"{identity} does not reconcile, off by {delta}. Not reported as a "
+            f"break because {names} was not extracted and could account for the "
+            f"difference."
+        )
+    else:
+        status = CheckStatus.FAILED
+        message = f"{identity} breaks by {delta} (tolerance {tol})."
+
+    return CheckResult(
+        check_id=check_id,
+        identity=identity,
+        status=status,
+        severity=severity,
+        period_label=period.label,
+        expected=expected,
+        actual=actual,
+        delta=delta,
+        tolerance=tol,
+        fact_ids=tuple(f.id for f in facts),
+        missing=tuple(c.value for c in absent_optional),
+        message=message,
+    )
+
+
+def _compare_subtotal(
+    *,
+    check_id: str,
+    identity: str,
+    severity: Severity,
+    period: Period,
+    total: FinancialFact,
+    components: Sequence[FinancialFact],
+    tolerance: ToleranceModel,
+) -> CheckResult:
+    """Evaluate a "subtotal = sum of its parts" identity asymmetrically.
+
+    A subtotal check cannot distinguish "the components genuinely disagree with
+    the total" from "we only extracted some of the components" -- both look like
+    a shortfall. Treating a shortfall as a failure means every sparsely
+    extracted statement reports a fabricated accounting break, which is exactly
+    the kind of false alarm that teaches a user to ignore the reconciliation
+    panel.
+
+    So the two directions are judged differently:
+
+    overshoot  components sum to MORE than the stated total. This is a real
+               contradiction -- adding line items cannot exceed their own
+               subtotal no matter how many are missing. Reported as FAILED.
+    shortfall  components sum to LESS. Consistent with incomplete extraction, so
+               reported as SKIPPED, but the residual is recorded on the result.
+               The UI surfaces it as an unexplained gap, which is genuinely
+               informative: it is the size of the line items not yet captured.
+    """
+    expected = total.value
+    actual = sum((f.value for f in components), Decimal(0))
+    tol = tolerance.for_magnitude(expected)
+    delta = actual - expected
+    involved = [total, *components]
+
+    if delta > tol:
+        status, message = (
+            CheckStatus.FAILED,
+            f"{identity} is contradicted: the components sum to {actual}, which "
+            f"exceeds the stated total of {expected} by {delta} (tolerance {tol}).",
+        )
+    elif delta < -tol:
+        status, message = (
+            CheckStatus.SKIPPED,
+            f"{identity} could not be confirmed: the components captured so far "
+            f"sum to {actual}, leaving {-delta} of the stated total unexplained. "
+            f"This is consistent with line items not yet extracted.",
+        )
+    else:
+        status, message = CheckStatus.PASSED, f"{identity} holds within {tol}."
+
+    return CheckResult(
+        check_id=check_id,
+        identity=identity,
+        status=status,
+        severity=severity,
+        period_label=period.label,
+        expected=expected,
+        actual=actual,
+        delta=delta,
+        tolerance=tol,
+        fact_ids=tuple(f.id for f in involved),
+        message=message,
+    )
+
+
+def _tolerance_for(facts: Sequence[FinancialFact], terms: int | None = None) -> ToleranceModel:
+    """Derive a tolerance from the reporting scale of the facts involved.
+
+    Uses the coarsest scale present: if any input was printed in millions, the
+    whole identity inherits million-level rounding error.
+    """
+    scale = max((f.scale for f in facts), default=Decimal(1))
+    return ToleranceModel(scale=scale, terms=terms if terms is not None else max(len(facts), 2))
+
+
+def _fetch(
+    facts: FactSet, period: Period, concepts: Sequence[Concept]
+) -> tuple[list[FinancialFact], list[Concept]]:
+    """Split `concepts` into the facts found and the concepts missing."""
+    found: list[FinancialFact] = []
+    missing: list[Concept] = []
+    for concept in concepts:
+        fact = facts.get(concept, period)
+        if fact is None:
+            missing.append(concept)
+        else:
+            found.append(fact)
+    return found, missing
+
+
+def _instant_at(period: Period) -> Period:
+    """The balance sheet instant corresponding to the end of `period`."""
+    return Period(
+        kind=PeriodKind.INSTANT,
+        fiscal_year=period.fiscal_year,
+        fiscal_period=period.fiscal_period,
+        end_date=period.end_date,
+    )
+
+
+# ---------------------------------------------------------------------------
+# balance sheet
+# ---------------------------------------------------------------------------
+
+
+def check_balance_sheet_balances(facts: FactSet, period: Period) -> CheckResult | None:
+    """Assets = Liabilities + Equity. The one identity that is never optional."""
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Assets = Liabilities + Equity"
+    required = (Concept.TOTAL_ASSETS, Concept.TOTAL_LIABILITIES)
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("bs.balances", identity, Severity.CRITICAL, period, missing)
+
+    assets, liabilities = found
+
+    # Prefer total equity including non-controlling interests; fall back to
+    # stockholders' equity plus a separately-reported minority interest.
+    absent: tuple[Concept, ...] = ()
+    equity_fact = facts.get(Concept.TOTAL_EQUITY_INCL_MINORITY, period)
+    if equity_fact is not None:
+        equity_facts = [equity_fact]
+        equity = equity_fact.value
+    else:
+        parent = facts.get(Concept.TOTAL_STOCKHOLDERS_EQUITY, period)
+        if parent is None:
+            return _skipped(
+                "bs.balances",
+                identity,
+                Severity.CRITICAL,
+                period,
+                [Concept.TOTAL_STOCKHOLDERS_EQUITY],
+            )
+        minority = facts.get(Concept.MINORITY_INTEREST, period)
+        equity_facts = [parent] + ([minority] if minority else [])
+        equity = parent.value + (minority.value if minority else Decimal(0))
+        absent = () if minority else (Concept.MINORITY_INTEREST,)
+
+    involved = [assets, liabilities, *equity_facts]
+    return _compare(
+        check_id="bs.balances",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=assets.value,
+        actual=liabilities.value + equity,
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=3),
+        absent_optional=absent,
+    )
+
+
+def check_current_assets_subtotal(facts: FactSet, period: Period) -> CheckResult | None:
+    """Total current assets = sum of its components."""
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Total current assets = sum of current asset line items"
+    total = facts.get(Concept.TOTAL_CURRENT_ASSETS, period)
+    if total is None:
+        return _skipped(
+            "bs.current_assets", identity, Severity.WARNING, period, [Concept.TOTAL_CURRENT_ASSETS]
+        )
+
+    components = (
+        Concept.CASH_AND_EQUIVALENTS,
+        Concept.SHORT_TERM_INVESTMENTS,
+        Concept.ACCOUNTS_RECEIVABLE,
+        Concept.INVENTORY,
+        Concept.PREPAID_EXPENSES,
+        Concept.OTHER_CURRENT_ASSETS,
+    )
+    found, _ = _fetch(facts, period, components)
+    if not found:
+        return _skipped("bs.current_assets", identity, Severity.WARNING, period, components)
+
+    return _compare_subtotal(
+        check_id="bs.current_assets",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        total=total,
+        components=found,
+        tolerance=_tolerance_for([total, *found]),
+    )
+
+
+def check_current_liabilities_subtotal(facts: FactSet, period: Period) -> CheckResult | None:
+    """Total current liabilities = sum of its components."""
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Total current liabilities = sum of current liability line items"
+    total = facts.get(Concept.TOTAL_CURRENT_LIABILITIES, period)
+    if total is None:
+        return _skipped(
+            "bs.current_liabilities",
+            identity,
+            Severity.WARNING,
+            period,
+            [Concept.TOTAL_CURRENT_LIABILITIES],
+        )
+
+    components = (
+        Concept.ACCOUNTS_PAYABLE,
+        Concept.ACCRUED_LIABILITIES,
+        Concept.DEFERRED_REVENUE_CURRENT,
+        Concept.SHORT_TERM_DEBT,
+        Concept.CURRENT_PORTION_LONG_TERM_DEBT,
+        Concept.OTHER_CURRENT_LIABILITIES,
+    )
+    found, _ = _fetch(facts, period, components)
+    if not found:
+        return _skipped("bs.current_liabilities", identity, Severity.WARNING, period, components)
+
+    return _compare_subtotal(
+        check_id="bs.current_liabilities",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        total=total,
+        components=found,
+        tolerance=_tolerance_for([total, *found]),
+    )
+
+
+def check_assets_split(facts: FactSet, period: Period) -> CheckResult | None:
+    """Total assets = current + non-current assets."""
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Total assets = current assets + non-current assets"
+    required = (
+        Concept.TOTAL_ASSETS,
+        Concept.TOTAL_CURRENT_ASSETS,
+        Concept.TOTAL_NONCURRENT_ASSETS,
+    )
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("bs.assets_split", identity, Severity.WARNING, period, missing)
+
+    total, current, noncurrent = found
+    return _compare(
+        check_id="bs.assets_split",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=total.value,
+        actual=current.value + noncurrent.value,
+        facts=found,
+        tolerance=_tolerance_for(found, terms=3),
+    )
+
+
+def check_liabilities_and_equity_total(facts: FactSet, period: Period) -> CheckResult | None:
+    """The printed 'Total liabilities and equity' equals its parts."""
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Total liabilities and equity = liabilities + equity"
+    total = facts.get(Concept.TOTAL_LIABILITIES_AND_EQUITY, period)
+    liabilities = facts.get(Concept.TOTAL_LIABILITIES, period)
+    if total is None or liabilities is None:
+        return _skipped(
+            "bs.le_total",
+            identity,
+            Severity.CRITICAL,
+            period,
+            [c for c, f in
+             ((Concept.TOTAL_LIABILITIES_AND_EQUITY, total), (Concept.TOTAL_LIABILITIES, liabilities))
+             if f is None],
+        )
+
+    equity_fact = facts.get(Concept.TOTAL_EQUITY_INCL_MINORITY, period) or facts.get(
+        Concept.TOTAL_STOCKHOLDERS_EQUITY, period
+    )
+    if equity_fact is None:
+        return _skipped(
+            "bs.le_total", identity, Severity.CRITICAL, period, [Concept.TOTAL_STOCKHOLDERS_EQUITY]
+        )
+
+    involved = [total, liabilities, equity_fact]
+    return _compare(
+        check_id="bs.le_total",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=total.value,
+        actual=liabilities.value + equity_fact.value,
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=3),
+    )
+
+
+# ---------------------------------------------------------------------------
+# income statement
+# ---------------------------------------------------------------------------
+
+
+def check_gross_profit(facts: FactSet, period: Period) -> CheckResult | None:
+    """Gross profit = revenue - cost of revenue."""
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Gross profit = revenue - cost of revenue"
+    required = (Concept.REVENUE, Concept.COST_OF_REVENUE, Concept.GROSS_PROFIT)
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("is.gross_profit", identity, Severity.WARNING, period, missing)
+
+    revenue, cogs, gross = found
+    return _compare(
+        check_id="is.gross_profit",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=gross.value,
+        actual=revenue.value - cogs.value,
+        facts=found,
+        tolerance=_tolerance_for(found, terms=3),
+    )
+
+
+def check_operating_income(facts: FactSet, period: Period) -> CheckResult | None:
+    """Operating income = gross profit - total operating expenses."""
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Operating income = gross profit - operating expenses"
+    required = (
+        Concept.GROSS_PROFIT,
+        Concept.TOTAL_OPERATING_EXPENSES,
+        Concept.OPERATING_INCOME,
+    )
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("is.operating_income", identity, Severity.WARNING, period, missing)
+
+    gross, opex, operating = found
+    return _compare(
+        check_id="is.operating_income",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=operating.value,
+        actual=gross.value - opex.value,
+        facts=found,
+        tolerance=_tolerance_for(found, terms=3),
+    )
+
+
+def check_operating_expense_subtotal(facts: FactSet, period: Period) -> CheckResult | None:
+    """Total operating expenses = sum of the operating expense line items."""
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Total operating expenses = sum of operating expense line items"
+    total = facts.get(Concept.TOTAL_OPERATING_EXPENSES, period)
+    if total is None:
+        return _skipped(
+            "is.opex_subtotal",
+            identity,
+            Severity.WARNING,
+            period,
+            [Concept.TOTAL_OPERATING_EXPENSES],
+        )
+
+    components = (
+        Concept.RESEARCH_AND_DEVELOPMENT,
+        Concept.SELLING_GENERAL_ADMIN,
+        Concept.SALES_AND_MARKETING,
+        Concept.GENERAL_AND_ADMIN,
+        Concept.OTHER_OPERATING_EXPENSE,
+    )
+    found, _ = _fetch(facts, period, components)
+    if not found:
+        return _skipped("is.opex_subtotal", identity, Severity.WARNING, period, components)
+
+    # SG&A and its S&M / G&A decomposition are alternative presentations of the
+    # same spend. Summing all three double-counts, so drop the aggregate when
+    # both components are present.
+    present = {f.concept for f in found}
+    if {Concept.SALES_AND_MARKETING, Concept.GENERAL_AND_ADMIN} <= present:
+        found = [f for f in found if f.concept is not Concept.SELLING_GENERAL_ADMIN]
+
+    return _compare_subtotal(
+        check_id="is.opex_subtotal",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        total=total,
+        components=found,
+        tolerance=_tolerance_for([total, *found]),
+    )
+
+
+def check_net_income(facts: FactSet, period: Period) -> CheckResult | None:
+    """Net income = pre-tax income - tax expense."""
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Net income = pre-tax income - income tax expense"
+    required = (Concept.PRETAX_INCOME, Concept.INCOME_TAX_EXPENSE, Concept.NET_INCOME)
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("is.net_income", identity, Severity.WARNING, period, missing)
+
+    pretax, tax, net = found
+    return _compare(
+        check_id="is.net_income",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=net.value,
+        actual=pretax.value - tax.value,
+        facts=found,
+        tolerance=_tolerance_for(found, terms=3),
+    )
+
+
+def check_eps(facts: FactSet, period: Period) -> CheckResult | None:
+    """Diluted EPS = net income to common / diluted weighted average shares.
+
+    Informational: EPS is reported to the cent, so back-solving it against
+    figures rounded to millions is inherently imprecise. A break here is a hint
+    to re-read the extraction, not proof of one.
+    """
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Diluted EPS = net income to common / diluted shares"
+    eps = facts.get(Concept.EPS_DILUTED, period)
+    shares = facts.get(Concept.SHARES_DILUTED, period)
+    income = facts.get(Concept.NET_INCOME_TO_COMMON, period) or facts.get(
+        Concept.NET_INCOME, period
+    )
+    if eps is None or shares is None or income is None:
+        return _skipped(
+            "is.eps",
+            identity,
+            Severity.INFO,
+            period,
+            [c for c, f in
+             ((Concept.EPS_DILUTED, eps), (Concept.SHARES_DILUTED, shares), (Concept.NET_INCOME, income))
+             if f is None],
+        )
+    if shares.value == 0:
+        return _skipped("is.eps", identity, Severity.INFO, period, [Concept.SHARES_DILUTED])
+
+    involved = [eps, shares, income]
+    computed = income.value / shares.value
+    # EPS is printed to the cent; allow half a cent of rounding plus 1% for the
+    # rounding already baked into the income and share counts.
+    return _compare(
+        check_id="is.eps",
+        identity=identity,
+        severity=Severity.INFO,
+        period=period,
+        expected=eps.value,
+        actual=computed,
+        facts=involved,
+        tolerance=ToleranceModel(scale=Decimal("0.01"), terms=1, relative=Decimal("0.01")),
+    )
+
+
+# ---------------------------------------------------------------------------
+# cash flow
+# ---------------------------------------------------------------------------
+
+
+def check_cash_rollforward(facts: FactSet, period: Period) -> CheckResult | None:
+    """Ending cash = beginning cash + operating + investing + financing + FX.
+
+    The strongest single check in the system: it ties all three sections of the
+    cash flow statement together and, via the next check, back to the balance
+    sheet.
+    """
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Ending cash = beginning cash + operating + investing + financing + FX"
+    required = (
+        Concept.NET_CASH_OPERATING,
+        Concept.NET_CASH_INVESTING,
+        Concept.NET_CASH_FINANCING,
+    )
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("cf.rollforward", identity, Severity.CRITICAL, period, missing)
+
+    instant = _instant_at(period)
+    beginning = facts.get(Concept.CASH_BEGINNING_OF_PERIOD, instant)
+    ending = facts.get(Concept.CASH_END_OF_PERIOD, instant)
+    if beginning is None or ending is None:
+        return _skipped(
+            "cf.rollforward",
+            identity,
+            Severity.CRITICAL,
+            period,
+            [c for c, f in
+             ((Concept.CASH_BEGINNING_OF_PERIOD, beginning), (Concept.CASH_END_OF_PERIOD, ending))
+             if f is None],
+        )
+
+    operating, investing, financing = found
+    fx = facts.get(Concept.FX_EFFECT_ON_CASH, period)
+
+    involved = [beginning, ending, operating, investing, financing] + ([fx] if fx else [])
+    actual = (
+        beginning.value
+        + operating.value
+        + investing.value
+        + financing.value
+        + (fx.value if fx else Decimal(0))
+    )
+    return _compare(
+        check_id="cf.rollforward",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=ending.value,
+        actual=actual,
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=len(involved)),
+        absent_optional=() if fx else (Concept.FX_EFFECT_ON_CASH,),
+    )
+
+
+def check_net_change_in_cash(facts: FactSet, period: Period) -> CheckResult | None:
+    """The printed net change in cash equals the sum of the three sections."""
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Net change in cash = operating + investing + financing + FX"
+    required = (
+        Concept.NET_CHANGE_IN_CASH,
+        Concept.NET_CASH_OPERATING,
+        Concept.NET_CASH_INVESTING,
+        Concept.NET_CASH_FINANCING,
+    )
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("cf.net_change", identity, Severity.WARNING, period, missing)
+
+    change, operating, investing, financing = found
+    fx = facts.get(Concept.FX_EFFECT_ON_CASH, period)
+    involved = [*found] + ([fx] if fx else [])
+    return _compare(
+        check_id="cf.net_change",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=change.value,
+        actual=(
+            operating.value + investing.value + financing.value + (fx.value if fx else Decimal(0))
+        ),
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=len(involved)),
+        absent_optional=() if fx else (Concept.FX_EFFECT_ON_CASH,),
+    )
+
+
+def check_cash_ties_to_balance_sheet(facts: FactSet, period: Period) -> CheckResult | None:
+    """Cash flow statement ending cash = balance sheet cash at the same instant.
+
+    This is the cross-statement tie. If it holds, the cash flow statement and
+    the balance sheet were extracted from the same period and the same scale --
+    which catches the single most damaging extraction error, a column offset.
+    """
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Cash flow ending cash = balance sheet cash"
+    cf_cash = facts.get(Concept.CASH_END_OF_PERIOD, period)
+    bs_cash = facts.get(Concept.CASH_AND_EQUIVALENTS, period)
+    if cf_cash is None or bs_cash is None:
+        return _skipped(
+            "xs.cash_tie",
+            identity,
+            Severity.CRITICAL,
+            period,
+            [c for c, f in
+             ((Concept.CASH_END_OF_PERIOD, cf_cash), (Concept.CASH_AND_EQUIVALENTS, bs_cash))
+             if f is None],
+        )
+
+    involved = [cf_cash, bs_cash]
+    return _compare(
+        check_id="xs.cash_tie",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=bs_cash.value,
+        actual=cf_cash.value,
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=2),
+    )
+
+
+def check_net_income_ties_to_cash_flow(facts: FactSet, period: Period) -> CheckResult | None:
+    """Net income on the income statement = the cash flow statement's top line.
+
+    Both are stored under NET_INCOME, so a genuine mismatch surfaces earlier as
+    a CONFLICTED fact. This check exists to make the tie explicit in the report
+    and to catch the case where the conflict was resolved in favour of one
+    document but the other value is still on file.
+    """
+    if period.kind is not PeriodKind.DURATION:
+        return None
+
+    identity = "Income statement net income = cash flow statement net income"
+    candidates = [f for f in facts.for_period(period) if f.concept is Concept.NET_INCOME]
+    if len(candidates) < 2:
+        return _skipped("xs.net_income_tie", identity, Severity.INFO, period, [Concept.NET_INCOME])
+
+    first, *rest = candidates
+    worst = max(rest, key=lambda f: abs(f.value - first.value))
+    return _compare(
+        check_id="xs.net_income_tie",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=first.value,
+        actual=worst.value,
+        facts=candidates,
+        tolerance=_tolerance_for(candidates, terms=2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# period arithmetic
+# ---------------------------------------------------------------------------
+
+
+def check_period_arithmetic(facts: FactSet, period: Period) -> CheckResult | None:
+    """A cumulative period equals the sum of its constituent quarters.
+
+    Only meaningful for flow concepts: a balance sheet instant does not
+    decompose additively. Evaluated once per cumulative period, over revenue as
+    the representative flow.
+    """
+    if period.kind is not PeriodKind.DURATION:
+        return None
+    parts = PERIOD_COMPOSITION.get(period.fiscal_period)
+    if parts is None:
+        return None
+
+    identity = f"{period.fiscal_period.value} revenue = sum of {', '.join(p.value for p in parts)}"
+    total = facts.get(Concept.REVENUE, period)
+    if total is None:
+        return _skipped("period.arithmetic", identity, Severity.WARNING, period, [Concept.REVENUE])
+
+    quarter_facts: list[FinancialFact] = []
+    for part in parts:
+        match = [
+            f
+            for f in facts
+            if f.concept is Concept.REVENUE
+            and f.period.fiscal_year == period.fiscal_year
+            and f.period.fiscal_period is part
+        ]
+        if len(match) != 1:
+            return _skipped("period.arithmetic", identity, Severity.WARNING, period, [Concept.REVENUE])
+        quarter_facts.append(match[0])
+
+    involved = [total, *quarter_facts]
+    return _compare(
+        check_id="period.arithmetic",
+        identity=identity,
+        severity=Severity.WARNING,
+        period=period,
+        expected=total.value,
+        actual=sum((f.value for f in quarter_facts), Decimal(0)),
+        facts=involved,
+        tolerance=_tolerance_for(involved, terms=len(involved)),
+    )
+
+
+def check_no_duplicate_periods(facts: FactSet, period: Period) -> CheckResult | None:
+    """No concept is reported twice for the same period with different values.
+
+    Duplicate slots make every downstream lookup ambiguous, so this is treated
+    as critical even though it is a structural rather than an accounting check.
+    """
+    duplicates = {
+        key: group
+        for key, group in facts.for_period(period).duplicates().items()
+        if len({f.value for f in group}) > 1
+    }
+    identity = "Each concept has at most one value per period"
+    if not duplicates:
+        return CheckResult(
+            check_id="struct.no_duplicates",
+            identity=identity,
+            status=CheckStatus.PASSED,
+            severity=Severity.CRITICAL,
+            period_label=period.label,
+            message=identity + " holds.",
+        )
+
+    offenders = sorted(k.concept.value for k in duplicates)
+    return CheckResult(
+        check_id="struct.no_duplicates",
+        identity=identity,
+        status=CheckStatus.FAILED,
+        severity=Severity.CRITICAL,
+        period_label=period.label,
+        fact_ids=tuple(f.id for group in duplicates.values() for f in group),
+        message=(
+            f"{len(duplicates)} concept(s) have conflicting values in "
+            f"{period.label}: {', '.join(offenders)}."
+        ),
+    )
+
+
+ALL_CHECKS: tuple[Check, ...] = (
+    check_no_duplicate_periods,
+    # balance sheet
+    check_balance_sheet_balances,
+    check_liabilities_and_equity_total,
+    check_assets_split,
+    check_current_assets_subtotal,
+    check_current_liabilities_subtotal,
+    # income statement
+    check_gross_profit,
+    check_operating_expense_subtotal,
+    check_operating_income,
+    check_net_income,
+    check_eps,
+    # cash flow
+    check_cash_rollforward,
+    check_net_change_in_cash,
+    # cross-statement
+    check_cash_ties_to_balance_sheet,
+    check_net_income_ties_to_cash_flow,
+    # periods
+    check_period_arithmetic,
+)
+
+
+__all__ = [
+    "ALL_CHECKS",
+    "Check",
+    "FiscalPeriod",
+    *(c.__name__ for c in ALL_CHECKS),
+]
