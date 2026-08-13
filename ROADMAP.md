@@ -42,14 +42,23 @@ Status key: **next** = actively queued · **planned** = agreed, not started ·
   EPS; real estate at cost less accumulated depreciation.
 - **idea** — **Insurance template (Article 7).** Premiums earned, loss reserves,
   float. Lower priority unless we specifically target the sector.
-- **idea** — **DERA Financial Statement Data Sets.** The SEC's quarterly
+- **next** — **DERA Financial Statement Data Sets.** The SEC's quarterly
   research files include `pre.txt`, which marks each fact with the statement it
   appears on (BS/IS/CF/EQ/CI) — the presentation information `companyfacts`
-  lacks. Would give an authoritative statement-face tag list instead of hand
-  curation.
+  lacks.
   - Build-time only: download once, produce a static dict, discard. Never a
     runtime dependency.
-  - Only worth doing if hand curation stalls.
+  - **Promoted from "idea" after hand curation stalled.** Measured across 20
+    companies: balance sheet verification sits at 23%, because component lines
+    are only corroborated when their subtotal reconciles, and those subtotals
+    fall short wherever the tag map misses a line item.
+  - Hand curation cannot close that gap efficiently. Ranking unmapped tags by
+    how many companies report them returns almost entirely footnote schedules —
+    `DeferredTaxAssets*`, `LesseeOperatingLeaseLiabilityPaymentsDue*`,
+    `FiniteLivedIntangibleAssetsAmortizationExpense*` — none of which appear on
+    the face of a statement. Filtering to balance sheet instants does not
+    separate them. `pre.txt` answers definitively what ranking by frequency
+    cannot.
 
 ## Known data problems
 
