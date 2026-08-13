@@ -1,0 +1,164 @@
+"""Pipeline orchestration and the in-process entity store.
+
+Ingesting a company means fetching several MB from EDGAR, adapting ~25,000
+observations and running the validation layer -- seconds on a cold cache. Doing
+that inside a request would make the first load for any ticker feel broken, so
+`request_ingest` starts the work and returns immediately; the client polls until
+the entity reports `ready`.
+
+The store is in-process for now. Postgres persistence is on the roadmap, and the
+interface here is deliberately narrow so swapping the backing store does not
+reach into the API layer.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+
+from finagentic.config import settings
+from finagentic.domain.ledger import FactSet
+from finagentic.ingest.edgar import EdgarClient, EdgarError, Registrant, UnknownTickerError
+from finagentic.ingest.shapes import ShapeAssessment, detect_shape
+from finagentic.ingest.xbrl_adapter import AdaptationReport, to_facts
+from finagentic.validation.engine import validate
+from finagentic.validation.results import ValidationReport
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EntityRecord:
+    """One company's ingested state."""
+
+    registrant: Registrant
+    state: str = "ingesting"
+    facts: FactSet = field(default_factory=FactSet)
+    shape: ShapeAssessment | None = None
+    adaptation: AdaptationReport | None = None
+    validation: ValidationReport | None = None
+    error: str | None = None
+
+    @property
+    def advisories(self) -> tuple[str, ...]:
+        """Things the user must be told before trusting what they see.
+
+        Returned with every entity response rather than logged, because both
+        conditions here produce output that looks perfectly reasonable while
+        being built on the wrong data.
+        """
+        notes: list[str] = []
+        if self.adaptation is not None and self.adaptation.looks_truncated:
+            notes.append(
+                f"Only {self.adaptation.history_years:.1f} years of filings were "
+                f"found for this entity, with {self.adaptation.annual_reports} "
+                f"annual reports. A ticker resolves to whichever CIK currently "
+                f"holds it, so after a corporate reorganisation it points at the "
+                f"new holding company rather than the operating history. The "
+                f"longer history may sit under a predecessor CIK."
+            )
+        if self.shape is not None and not self.shape.is_supported:
+            notes.append(self.shape.message)
+        return tuple(notes)
+
+
+class EntityService:
+    """Resolves tickers and holds ingested ledgers."""
+
+    def __init__(self, client: EdgarClient | None = None) -> None:
+        self._client = client or EdgarClient(
+            user_agent=settings.sec_user_agent,
+            cache_dir=settings.cache_dir,
+        )
+        self._records: dict[int, EntityRecord] = {}
+        self._locks: dict[int, asyncio.Lock] = {}
+        # asyncio holds only a weak reference to a running task, so a task not
+        # referenced elsewhere can be garbage-collected mid-flight -- abandoning
+        # an ingestion with no error and leaving the entity stuck reporting
+        # "ingesting" forever. Keeping strong references until completion is the
+        # documented way to prevent that.
+        self._in_flight: set[asyncio.Task[None]] = set()
+
+    # ---- lookup -----------------------------------------------------------
+
+    def resolve(self, ticker: str) -> Registrant:
+        """Resolve a ticker, raising UnknownTickerError if it is not a filer."""
+        return self._client.lookup(ticker)
+
+    def registrant_for_cik(self, cik: int, ticker: str = "") -> Registrant:
+        return self._client.registrant_for_cik(cik, ticker)
+
+    def search(self, query: str, limit: int = 10) -> list[Registrant]:
+        return self._client.search(query, limit=limit)
+
+    def get(self, cik: int) -> EntityRecord | None:
+        return self._records.get(cik)
+
+    # ---- ingestion --------------------------------------------------------
+
+    async def request_ingest(self, registrant: Registrant) -> EntityRecord:
+        """Ensure `registrant` is ingested, starting the work if needed.
+
+        Returns immediately. A record already ready or already in flight is
+        returned as-is rather than re-fetched.
+        """
+        existing = self._records.get(registrant.cik)
+        if existing is not None and existing.state in ("ready", "ingesting"):
+            return existing
+
+        record = EntityRecord(registrant=registrant)
+        self._records[registrant.cik] = record
+
+        task = asyncio.create_task(self._ingest(record))
+        self._in_flight.add(task)
+        task.add_done_callback(self._in_flight.discard)
+        return record
+
+    async def ingest_now(self, registrant: Registrant) -> EntityRecord:
+        """Ingest synchronously. Used by tests and by CLI tooling."""
+        record = self._records.get(registrant.cik)
+        if record is not None and record.state == "ready":
+            return record
+        record = EntityRecord(registrant=registrant)
+        self._records[registrant.cik] = record
+        await self._ingest(record)
+        return record
+
+    async def _ingest(self, record: EntityRecord) -> None:
+        lock = self._locks.setdefault(record.registrant.cik, asyncio.Lock())
+        async with lock:
+            try:
+                # The EDGAR client is synchronous and the work is a multi-MB
+                # download followed by CPU-bound adaptation, so it runs off the
+                # event loop rather than blocking every other request.
+                await asyncio.to_thread(_run_pipeline, self._client, record)
+                record.state = "ready"
+            except EdgarError as exc:
+                logger.warning("ingest failed for %s: %s", record.registrant.ticker, exc)
+                record.state = "error"
+                record.error = str(exc)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception("unexpected ingest failure for %s", record.registrant.ticker)
+                record.state = "error"
+                record.error = f"Unexpected failure during ingestion: {exc}"
+
+
+def _run_pipeline(client: EdgarClient, record: EntityRecord) -> None:
+    """Fetch, adapt and validate. Runs in a worker thread."""
+    observations = client.observations(record.registrant)
+
+    # Shape is detected from the raw tag set, before adaptation drops everything
+    # the commercial map does not know -- which is exactly the evidence that
+    # identifies a non-commercial filer.
+    record.shape = detect_shape({o.tag for o in observations})
+
+    facts, adaptation = to_facts(observations, record.registrant)
+    verified, validation = validate(facts)
+
+    record.facts = verified
+    record.adaptation = adaptation
+    record.validation = validation
+
+
+__all__ = ["EntityRecord", "EntityService", "UnknownTickerError"]

@@ -56,6 +56,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # wrapped across three lines each, and some us-gaap tag names are 100+ chars.
 "finagentic/domain/concepts.py" = ["E501"]
 "finagentic/ingest/tag_map.py" = ["E501"]
+# B008 flags function calls in argument defaults, but `Depends(...)` and
+# `Query(...)` in defaults is FastAPI's documented dependency-injection idiom.
+"finagentic/api/app.py" = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"
