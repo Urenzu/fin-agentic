@@ -16,6 +16,7 @@ Write a function taking (FactSet, Period) and returning CheckResult | None
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import date, timedelta
 from decimal import Decimal
 
 from finagentic.domain.concepts import Concept
@@ -269,6 +270,35 @@ def _instant_at(period: Period) -> Period:
     )
 
 
+#: Days of slack when matching a balance sheet date to a period boundary. A
+#: period beginning the day after the prior period ended is the normal case, but
+#: 52/53-week calendars and the occasional off-by-a-weekend make an exact match
+#: too brittle.
+_INSTANT_MATCH_DAYS = 4
+
+
+def _cash_on(facts: FactSet, when: date) -> FinancialFact | None:
+    """The balance sheet cash figure at (or adjacent to) `when`.
+
+    XBRL has no separate beginning-of-period and end-of-period cash tags. A cash
+    flow statement's opening and closing balances are the *same* concept,
+    `CashAndCashEquivalentsAtCarryingValue`, reported at two different instants.
+    Looking for dedicated concepts alone means the roll-forward can never
+    evaluate on XBRL data, which is how the strongest check in the system came to
+    be silently skipped on every filing.
+    """
+    candidates = [
+        f
+        for f in facts
+        if f.concept is Concept.CASH_AND_EQUIVALENTS
+        and f.period.kind is PeriodKind.INSTANT
+        and abs((f.period.end_date - when).days) <= _INSTANT_MATCH_DAYS
+    ]
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
 # ---------------------------------------------------------------------------
 # balance sheet
 # ---------------------------------------------------------------------------
@@ -280,12 +310,30 @@ def check_balance_sheet_balances(facts: FactSet, period: Period) -> CheckResult 
         return None
 
     identity = "Assets = Liabilities + Equity"
-    required = (Concept.TOTAL_ASSETS, Concept.TOTAL_LIABILITIES)
-    found, missing = _fetch(facts, period, required)
-    if missing:
-        return _skipped("bs.balances", identity, Severity.CRITICAL, period, missing)
+    assets = facts.get(Concept.TOTAL_ASSETS, period)
+    if assets is None:
+        return _skipped("bs.balances", identity, Severity.CRITICAL, period, [Concept.TOTAL_ASSETS])
 
-    assets, liabilities = found
+    # Many filers never tag a total `Liabilities` line: the balance sheet runs
+    # current liabilities, non-current liabilities, then straight into equity.
+    # Summing the two halves recovers the total exactly rather than abandoning
+    # the most important check in the system.
+    liabilities = facts.get(Concept.TOTAL_LIABILITIES, period)
+    if liabilities is not None:
+        liability_facts = [liabilities]
+        liability_total = liabilities.value
+    else:
+        halves, missing_halves = _fetch(
+            facts,
+            period,
+            (Concept.TOTAL_CURRENT_LIABILITIES, Concept.TOTAL_NONCURRENT_LIABILITIES),
+        )
+        if missing_halves:
+            return _skipped(
+                "bs.balances", identity, Severity.CRITICAL, period, [Concept.TOTAL_LIABILITIES]
+            )
+        liability_facts = halves
+        liability_total = sum((f.value for f in halves), Decimal(0))
 
     # Prefer total equity including non-controlling interests; fall back to
     # stockholders' equity plus a separately-reported minority interest.
@@ -309,17 +357,49 @@ def check_balance_sheet_balances(facts: FactSet, period: Period) -> CheckResult 
         equity = parent.value + (minority.value if minority else Decimal(0))
         absent = () if minority else (Concept.MINORITY_INTEREST,)
 
-    involved = [assets, liabilities, *equity_facts]
+    involved = [assets, *liability_facts, *equity_facts]
     return _compare(
         check_id="bs.balances",
         identity=identity,
         severity=Severity.CRITICAL,
         period=period,
         expected=assets.value,
-        actual=liabilities.value + equity,
+        actual=liability_total + equity,
         facts=involved,
         tolerance=_tolerance_for(involved, terms=3),
         absent_optional=absent,
+    )
+
+
+def check_assets_tie_to_total_liabilities_and_equity(
+    facts: FactSet, period: Period
+) -> CheckResult | None:
+    """Assets = the printed "Total liabilities and equity".
+
+    The cheapest corroboration on the balance sheet: both figures appear on the
+    face of almost every filing, and they must agree by construction. It costs
+    two lookups and verifies total assets even when a filer tags no separate
+    `Liabilities` total, which many do not.
+    """
+    if period.kind is not PeriodKind.INSTANT:
+        return None
+
+    identity = "Total assets = total liabilities and equity"
+    required = (Concept.TOTAL_ASSETS, Concept.TOTAL_LIABILITIES_AND_EQUITY)
+    found, missing = _fetch(facts, period, required)
+    if missing:
+        return _skipped("bs.assets_tie", identity, Severity.CRITICAL, period, missing)
+
+    assets, le_total = found
+    return _compare(
+        check_id="bs.assets_tie",
+        identity=identity,
+        severity=Severity.CRITICAL,
+        period=period,
+        expected=assets.value,
+        actual=le_total.value,
+        facts=found,
+        tolerance=_tolerance_for(found, terms=2),
     )
 
 
@@ -380,6 +460,7 @@ def check_current_liabilities_subtotal(facts: FactSet, period: Period) -> CheckR
         Concept.DEFERRED_REVENUE_CURRENT,
         Concept.SHORT_TERM_DEBT,
         Concept.CURRENT_PORTION_LONG_TERM_DEBT,
+        Concept.OPERATING_LEASE_LIABILITY_CURRENT,
         Concept.OTHER_CURRENT_LIABILITIES,
     )
     found, _ = _fetch(facts, period, components)
@@ -684,18 +765,22 @@ def check_cash_rollforward(facts: FactSet, period: Period) -> CheckResult | None
     if missing:
         return _skipped("cf.rollforward", identity, Severity.CRITICAL, period, missing)
 
+    # Prefer explicitly-reported opening and closing balances -- a PDF cash flow
+    # statement prints them as their own lines -- and otherwise take them from
+    # the balance sheet at the period's boundaries, which is how XBRL carries
+    # them.
     instant = _instant_at(period)
-    beginning = facts.get(Concept.CASH_BEGINNING_OF_PERIOD, instant)
-    ending = facts.get(Concept.CASH_END_OF_PERIOD, instant)
+    beginning = facts.get(Concept.CASH_BEGINNING_OF_PERIOD, instant) or _cash_on(
+        facts, period.start_date - timedelta(days=1)
+    )
+    ending = facts.get(Concept.CASH_END_OF_PERIOD, instant) or _cash_on(facts, period.end_date)
     if beginning is None or ending is None:
         return _skipped(
             "cf.rollforward",
             identity,
             Severity.CRITICAL,
             period,
-            [c for c, f in
-             ((Concept.CASH_BEGINNING_OF_PERIOD, beginning), (Concept.CASH_END_OF_PERIOD, ending))
-             if f is None],
+            [Concept.CASH_AND_EQUIVALENTS],
         )
 
     operating, investing, financing = found
@@ -913,6 +998,7 @@ ALL_CHECKS: tuple[Check, ...] = (
     check_no_duplicate_periods,
     # balance sheet
     check_balance_sheet_balances,
+    check_assets_tie_to_total_liabilities_and_equity,
     check_liabilities_and_equity_total,
     check_assets_split,
     check_current_assets_subtotal,

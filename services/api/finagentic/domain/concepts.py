@@ -119,6 +119,7 @@ class Concept(StrEnum):
     DEFERRED_REVENUE_CURRENT = "ContractWithCustomerLiabilityCurrent"
     SHORT_TERM_DEBT = "ShortTermBorrowings"
     CURRENT_PORTION_LONG_TERM_DEBT = "LongTermDebtCurrent"
+    OPERATING_LEASE_LIABILITY_CURRENT = "OperatingLeaseLiabilityCurrent"
     OTHER_CURRENT_LIABILITIES = "OtherLiabilitiesCurrent"
     TOTAL_CURRENT_LIABILITIES = "LiabilitiesCurrent"
     LONG_TERM_DEBT = "LongTermDebtNoncurrent"
@@ -239,6 +240,7 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
     Concept.DEFERRED_REVENUE_CURRENT: ConceptMeta(_BS, _I, _M, Unit.USD, "Deferred revenue, current"),
     Concept.SHORT_TERM_DEBT: ConceptMeta(_BS, _I, _M, Unit.USD, "Short-term debt"),
     Concept.CURRENT_PORTION_LONG_TERM_DEBT: ConceptMeta(_BS, _I, _M, Unit.USD, "Current portion of long-term debt"),
+    Concept.OPERATING_LEASE_LIABILITY_CURRENT: ConceptMeta(_BS, _I, _M, Unit.USD, "Operating lease liabilities, current"),
     Concept.OTHER_CURRENT_LIABILITIES: ConceptMeta(_BS, _I, _M, Unit.USD, "Other current liabilities"),
     Concept.TOTAL_CURRENT_LIABILITIES: ConceptMeta(_BS, _I, _M, Unit.USD, "Total current liabilities", is_subtotal=True),
     Concept.LONG_TERM_DEBT: ConceptMeta(_BS, _I, _M, Unit.USD, "Long-term debt"),

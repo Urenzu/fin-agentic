@@ -280,10 +280,38 @@ def test_identical_duplicates_are_not_a_conflict(clean_filing, fy2024):
 # ---------------------------------------------------------------------------
 
 
-def test_missing_inputs_skip_rather_than_fail(clean_filing, fy2024_instant):
-    sparse = FactSet(
-        f for f in clean_filing if f.concept is not Concept.TOTAL_LIABILITIES
-    )
+#: Filers commonly tag no total `Liabilities` line at all, running current
+#: liabilities, then non-current, then straight into equity.
+_LIABILITY_TOTALS = (
+    Concept.TOTAL_LIABILITIES,
+    Concept.TOTAL_CURRENT_LIABILITIES,
+    Concept.TOTAL_NONCURRENT_LIABILITIES,
+)
+
+
+def test_a_missing_liabilities_total_is_recovered_from_its_halves(clean_filing):
+    """Current + non-current liabilities reconstructs the total exactly.
+
+    Skipping instead would abandon the balance sheet check for the many filers
+    that never tag a `Liabilities` line.
+    """
+    sparse = FactSet(f for f in clean_filing if f.concept is not Concept.TOTAL_LIABILITIES)
+    statuses = _statuses(run_checks(sparse), "bs.balances")
+
+    assert CheckStatus.PASSED in statuses
+    assert CheckStatus.FAILED not in statuses
+
+
+def test_an_imbalance_is_still_caught_via_the_liability_halves(clean_filing, fy2024_instant):
+    """The fallback must not become a way for a real break to slip through."""
+    sparse = FactSet(f for f in clean_filing if f.concept is not Concept.TOTAL_LIABILITIES)
+    broken = _replace_value(sparse, Concept.TOTAL_ASSETS, fy2024_instant, "14500")
+    assert CheckStatus.FAILED in _statuses(run_checks(broken), "bs.balances")
+
+
+def test_missing_inputs_skip_rather_than_fail(clean_filing):
+    """With no liabilities figure of any kind, the check cannot be evaluated."""
+    sparse = FactSet(f for f in clean_filing if f.concept not in _LIABILITY_TOTALS)
     report = run_checks(sparse)
 
     assert CheckStatus.SKIPPED in _statuses(report, "bs.balances")
@@ -291,12 +319,24 @@ def test_missing_inputs_skip_rather_than_fail(clean_filing, fy2024_instant):
 
 
 def test_skipped_checks_name_what_is_missing(clean_filing):
-    sparse = FactSet(f for f in clean_filing if f.concept is not Concept.TOTAL_LIABILITIES)
+    sparse = FactSet(f for f in clean_filing if f.concept not in _LIABILITY_TOTALS)
     result = next(
         r for r in run_checks(sparse).results
         if r.check_id == "bs.balances" and r.status is CheckStatus.SKIPPED
     )
     assert Concept.TOTAL_LIABILITIES.value in result.missing
+
+
+def test_total_assets_tie_to_liabilities_and_equity(clean_filing):
+    """The cheapest corroboration on the balance sheet; both lines are printed."""
+    assert CheckStatus.PASSED in _statuses(run_checks(clean_filing), "bs.assets_tie")
+
+
+def test_a_broken_assets_tie_is_caught(clean_filing, fy2024_instant):
+    broken = _replace_value(
+        clean_filing, Concept.TOTAL_LIABILITIES_AND_EQUITY, fy2024_instant, "14500"
+    )
+    assert CheckStatus.FAILED in _statuses(run_checks(broken), "bs.assets_tie")
 
 
 def test_an_empty_ledger_produces_no_results():
@@ -323,7 +363,7 @@ def test_every_registered_check_emits_a_result_for_some_input(clean_filing, fy20
         "bs.current_assets", "bs.current_liabilities", "is.gross_profit",
         "is.opex_subtotal", "is.operating_income", "is.net_income", "is.eps",
         "cf.rollforward", "cf.net_change", "xs.cash_tie", "xs.net_income_tie",
-        "period.arithmetic",
+        "period.arithmetic", "bs.assets_tie",
     }
     assert len(registered) == len(ALL_CHECKS), (
         "ALL_CHECKS changed; update the expected check-id set in this test"

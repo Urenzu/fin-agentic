@@ -105,6 +105,7 @@ TAG_TO_CONCEPT: dict[str, Concept] = {
     "ShortTermBorrowings": Concept.SHORT_TERM_DEBT,
     "CommercialPaper": Concept.SHORT_TERM_DEBT,
     "LongTermDebtCurrent": Concept.CURRENT_PORTION_LONG_TERM_DEBT,
+    "OperatingLeaseLiabilityCurrent": Concept.OPERATING_LEASE_LIABILITY_CURRENT,
     "OtherLiabilitiesCurrent": Concept.OTHER_CURRENT_LIABILITIES,
     "LiabilitiesCurrent": Concept.TOTAL_CURRENT_LIABILITIES,
     # ---- non-current liabilities -----------------------------------------
