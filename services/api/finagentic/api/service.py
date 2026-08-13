@@ -19,7 +19,15 @@ from dataclasses import dataclass, field
 
 from finagentic.config import settings
 from finagentic.domain.ledger import FactSet
-from finagentic.ingest.edgar import EdgarClient, EdgarError, Registrant, UnknownTickerError
+from finagentic.ingest.edgar import (
+    EdgarClient,
+    EdgarError,
+    Filing,
+    Registrant,
+    ReportRef,
+    UnknownTickerError,
+)
+from finagentic.ingest.rfiles import AsFiledStatement, parse_statement
 from finagentic.ingest.shapes import ShapeAssessment, detect_shape
 from finagentic.ingest.xbrl_adapter import AdaptationReport, to_facts
 from finagentic.validation.engine import validate
@@ -161,4 +169,43 @@ def _run_pipeline(client: EdgarClient, record: EntityRecord) -> None:
     record.validation = validation
 
 
-__all__ = ["EntityRecord", "EntityService", "UnknownTickerError"]
+
+
+class AsFiledService:
+    """Fetches and parses the SEC's rendered statement exhibits.
+
+    Separate from EntityService because the two answer different questions and
+    have different costs. `EntityService` builds a canonical ledger spanning a
+    company's whole history, for charts and comparison. This fetches one
+    filing's statements as the filer laid them out, for display.
+    """
+
+    def __init__(self, client: EdgarClient) -> None:
+        self._client = client
+
+    def latest_filing(self, registrant: Registrant, form: str = "10-K") -> Filing | None:
+        filings = self._client.recent_filings(
+            registrant, forms=frozenset({form}), limit=1
+        )
+        return filings[0] if filings else None
+
+    def filings(self, registrant: Registrant, form: str = "10-K", limit: int = 10) -> list[Filing]:
+        return self._client.recent_filings(registrant, forms=frozenset({form}), limit=limit)
+
+    def statement_index(self, filing: Filing) -> list[ReportRef]:
+        """The primary statements in a filing, excluding parentheticals.
+
+        Parenthetical exhibits restate par values and share counts already shown
+        on the face, so including them would render the same numbers twice.
+        """
+        return [
+            r
+            for r in self._client.filing_reports(filing)
+            if r.is_statement and not r.is_parenthetical
+        ]
+
+    def statement(self, filing: Filing, report: ReportRef) -> AsFiledStatement:
+        return parse_statement(self._client.fetch_report(filing, report))
+
+
+__all__ = ["AsFiledService", "EntityRecord", "EntityService", "UnknownTickerError"]

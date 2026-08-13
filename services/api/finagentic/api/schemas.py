@@ -151,3 +151,45 @@ class FactsOut(BaseModel):
 
 class SearchResultOut(BaseModel):
     results: tuple[RegistrantOut, ...] = Field(default=())
+
+
+class AsFiledRowOut(BaseModel):
+    label: str
+    element: str | None = None
+    tag: str | None = None
+    is_abstract: bool
+    is_total: bool
+    indent: int
+    #: Keyed by column label. A missing key means the cell was blank on the
+    #: face of the statement, which the filer uses to mean "not applicable",
+    #: not "zero".
+    values: dict[str, str]
+
+
+class AsFiledStatementOut(BaseModel):
+    """A statement exactly as the filer presented it."""
+
+    title: str
+    short_name: str
+    columns: tuple[str, ...]
+    column_dates: tuple[str | None, ...]
+    rows: tuple[AsFiledRowOut, ...]
+    #: Multipliers already applied to `values`; retained so a client can render
+    #: figures back at the scale the filing printed them.
+    monetary_scale: str
+    share_scale: str
+    accession: str
+    form: str
+    filed: str
+    source_url: str
+
+
+class AsFiledIndexOut(BaseModel):
+    """Which statements a filing contains."""
+
+    accession: str
+    form: str
+    filed: str
+    period_end: str | None
+    source_url: str
+    statements: tuple[dict[str, str], ...]

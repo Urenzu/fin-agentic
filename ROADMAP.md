@@ -48,10 +48,9 @@ Status key: **next** = actively queued · **planned** = agreed, not started ·
   lacks.
   - Build-time only: download once, produce a static dict, discard. Never a
     runtime dependency.
-  - **Promoted from "idea" after hand curation stalled.** Measured across 20
-    companies: balance sheet verification sits at 23%, because component lines
-    are only corroborated when their subtotal reconciles, and those subtotals
-    fall short wherever the tag map misses a line item.
+  - **Dropped.** `pre.txt` exists to say which tags belong on which statement,
+    in what order. The R-files answer exactly that, per filing, from a source
+    already being fetched � so the bulk research dataset earns nothing.
   - Hand curation cannot close that gap efficiently. Ranking unmapped tags by
     how many companies report them returns almost entirely footnote schedules —
     `DeferredTaxAssets*`, `LesseeOperatingLeaseLiabilityPaymentsDue*`,

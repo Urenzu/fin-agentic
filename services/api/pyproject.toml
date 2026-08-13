@@ -59,6 +59,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # B008 flags function calls in argument defaults, but `Depends(...)` and
 # `Query(...)` in defaults is FastAPI's documented dependency-injection idiom.
 "finagentic/api/app.py" = ["B008"]
+# HTML fixtures are copied verbatim from real filings; rewrapping them would
+# stop them exercising the markup the parser actually meets.
+"tests/unit/test_rfiles.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -18,10 +18,12 @@ company files, which is quarterly at most.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +66,79 @@ class Registrant:
     def cik10(self) -> str:
         """Zero-padded CIK, the form the API paths require."""
         return f"CIK{self.cik:010d}"
+
+
+@dataclass(frozen=True, slots=True)
+class Filing:
+    """One submission to EDGAR."""
+
+    accession: str
+    form: str
+    filed: date
+    period_end: date | None
+    primary_document: str
+    cik: int
+
+    @property
+    def accession_nodash(self) -> str:
+        return self.accession.replace("-", "")
+
+    @property
+    def base_url(self) -> str:
+        return f"{SEC_BASE}/Archives/edgar/data/{self.cik}/{self.accession_nodash}"
+
+    @property
+    def index_url(self) -> str:
+        return f"{self.base_url}/{self.accession}-index.htm"
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRef:
+    """A rendered exhibit within a filing."""
+
+    filename: str
+    short_name: str
+    long_name: str
+    category: str
+
+    @property
+    def is_statement(self) -> bool:
+        """Whether this exhibit is a primary financial statement.
+
+        The SEC's own categorisation, which is what makes it possible to render
+        only the face of the statements and none of the note disclosures.
+        """
+        return self.category == "Statements"
+
+    @property
+    def is_parenthetical(self) -> bool:
+        """Parenthetical exhibits restate share counts and par values already
+        shown on the face, so they are a duplicate view rather than a statement."""
+        return "parenthetical" in self.short_name.lower()
+
+
+def parse_filing_summary(xml: str) -> list[ReportRef]:
+    """Extract the exhibit list from a FilingSummary.xml document."""
+    reports: list[ReportRef] = []
+    for block in re.findall(r"<Report[^>]*>(.*?)</Report>", xml, re.S):
+        filename = _tag_text(block, "HtmlFileName") or _tag_text(block, "XmlFileName")
+        short = _tag_text(block, "ShortName")
+        if not filename or not short:
+            continue
+        reports.append(
+            ReportRef(
+                filename=filename,
+                short_name=unescape(short),
+                long_name=unescape(_tag_text(block, "LongName") or short),
+                category=_tag_text(block, "MenuCategory") or "",
+            )
+        )
+    return reports
+
+
+def _tag_text(block: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>(.*?)</{tag}>", block, re.S)
+    return match.group(1).strip() if match else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +242,30 @@ class EdgarClient:
             cache_path.write_text(json.dumps(payload), encoding="utf-8")
         return payload
 
+    def _get_text(self, url: str, *, cache_key: str | None = None) -> str:
+        """Fetch a non-JSON document, cached the same way."""
+        cache_path = (
+            self._cache_dir / f"{cache_key}.txt"
+            if self._cache_dir is not None and cache_key
+            else None
+        )
+        if cache_path is not None and cache_path.exists():
+            return cache_path.read_text(encoding="utf-8")
+
+        self._throttle()
+        try:
+            response = self._client.get(url, headers=self._headers)
+        except httpx.HTTPError as exc:
+            raise EdgarError(f"request to {url} failed: {exc}") from exc
+
+        if response.status_code != 200:
+            raise EdgarError(f"EDGAR returned {response.status_code} for {url}")
+
+        text = response.text
+        if cache_path is not None:
+            cache_path.write_text(text, encoding="utf-8")
+        return text
+
     # ---- registrants ------------------------------------------------------
 
     def _load_tickers(self) -> dict[str, Registrant]:
@@ -245,6 +344,72 @@ class EdgarClient:
         return self._get_json(
             f"{SEC_DATA_BASE}/api/xbrl/companyfacts/{registrant.cik10}.json",
             cache_key=f"companyfacts_{registrant.cik10}",
+        )
+
+    def submissions(self, registrant: Registrant) -> dict[str, Any]:
+        """Filing history for a registrant."""
+        return self._get_json(
+            f"{SEC_DATA_BASE}/submissions/{registrant.cik10}.json",
+            cache_key=f"submissions_{registrant.cik10}",
+        )
+
+    def recent_filings(
+        self,
+        registrant: Registrant,
+        forms: frozenset[str] = frozenset({"10-K"}),
+        limit: int = 10,
+    ) -> list[Filing]:
+        """Recent filings of the given forms, most recent first."""
+        recent = self.submissions(registrant).get("filings", {}).get("recent", {})
+        rows = zip(
+            recent.get("accessionNumber", []),
+            recent.get("form", []),
+            recent.get("filingDate", []),
+            recent.get("reportDate", []),
+            recent.get("primaryDocument", []),
+            strict=False,
+        )
+
+        filings: list[Filing] = []
+        for accession, form, filed, report, primary in rows:
+            if form not in forms:
+                continue
+            try:
+                filings.append(
+                    Filing(
+                        accession=accession,
+                        form=form,
+                        filed=date.fromisoformat(filed),
+                        period_end=date.fromisoformat(report) if report else None,
+                        primary_document=primary or "",
+                        cik=registrant.cik,
+                    )
+                )
+            except ValueError:
+                continue
+            if len(filings) >= limit:
+                break
+        return filings
+
+    def filing_reports(self, filing: Filing) -> list[ReportRef]:
+        """The rendered exhibits in a filing, as listed in FilingSummary.xml.
+
+        These are the SEC's own rendering of each statement, and they carry the
+        presentation information `companyfacts` omits: line order, the filer's
+        own labels, section headings, and which items belong on the face of a
+        statement at all.
+        """
+        xml = self._get_text(
+            f"{filing.base_url}/FilingSummary.xml",
+            cache_key=f"filingsummary_{filing.accession_nodash}",
+        )
+        return parse_filing_summary(xml)
+
+    def fetch_report(self, filing: Filing, report: ReportRef) -> str:
+        """The raw HTML of one rendered exhibit."""
+        return self._get_text(
+            f"{filing.base_url}/{report.filename}",
+            cache_key=f"report_{filing.accession_nodash}_{report.filename}",
         )
 
     def observations(self, registrant: Registrant) -> list[XbrlObservation]:

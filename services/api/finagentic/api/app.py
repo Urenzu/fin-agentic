@@ -20,7 +20,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from finagentic.api import schemas as s
-from finagentic.api.service import EntityRecord, EntityService, UnknownTickerError
+from finagentic.api.service import (
+    AsFiledService,
+    EntityRecord,
+    EntityService,
+    UnknownTickerError,
+)
 from finagentic.config import settings
 from finagentic.domain.concepts import Statement, meta
 from finagentic.domain.facts import XbrlProvenance
@@ -43,10 +48,15 @@ app.add_middleware(
 )
 
 _service = EntityService()
+_as_filed_service = AsFiledService(_service._client)
 
 
 def get_service() -> EntityService:
     return _service
+
+
+def get_as_filed_service() -> AsFiledService:
+    return _as_filed_service
 
 
 # ---------------------------------------------------------------------------
@@ -322,4 +332,120 @@ def get_facts(
     return s.FactsOut(
         facts=tuple(_fact_out(f) for f in selected[:limit]),
         total=len(selected),
+    )
+
+
+# ---------------------------------------------------------------------------
+# as-filed statements
+# ---------------------------------------------------------------------------
+#
+# The canonical statements above impose one shape on every company, which is
+# what charts and cross-company comparison need. These render a filing exactly
+# as its filer laid it out, which is what a reader recognises -- and it sidesteps
+# the coverage problem entirely. Apple's balance sheet carries a $33bn "Vendor
+# non-trade receivables" line that no canonical vocabulary would include, and
+# every filer has a few such lines. As filed, they simply appear.
+
+
+def _resolve_registrant(service: EntityService, cik: int) -> Registrant:
+    record = service.get(cik)
+    if record is not None:
+        return record.registrant
+    try:
+        return service.registrant_for_cik(cik)
+    except EdgarError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+def _latest_filing(as_filed: AsFiledService, registrant: Registrant, form: str, accession: str | None):
+    if accession is not None:
+        for filing in as_filed.filings(registrant, form=form, limit=40):
+            if filing.accession == accession:
+                return filing
+        raise HTTPException(404, f"No {form} with accession {accession} for this filer.")
+
+    filing = as_filed.latest_filing(registrant, form=form)
+    if filing is None:
+        raise HTTPException(404, f"This filer has no {form} on EDGAR.")
+    return filing
+
+
+@app.get("/entities/{cik}/filings", response_model=tuple[s.AsFiledIndexOut, ...])
+def list_filings(
+    cik: int,
+    form: str = Query("10-K"),
+    limit: int = Query(5, ge=1, le=40),
+    service: EntityService = Depends(get_service),
+    as_filed: AsFiledService = Depends(get_as_filed_service),
+) -> tuple[s.AsFiledIndexOut, ...]:
+    """Recent filings and the statements each contains."""
+    registrant = _resolve_registrant(service, cik)
+    try:
+        filings = as_filed.filings(registrant, form=form, limit=limit)
+        return tuple(
+            s.AsFiledIndexOut(
+                accession=f.accession,
+                form=f.form,
+                filed=f.filed.isoformat(),
+                period_end=f.period_end.isoformat() if f.period_end else None,
+                source_url=f.index_url,
+                statements=tuple(
+                    {"filename": r.filename, "name": r.short_name}
+                    for r in as_filed.statement_index(f)
+                ),
+            )
+            for f in filings
+        )
+    except EdgarError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@app.get("/entities/{cik}/as-filed", response_model=tuple[s.AsFiledStatementOut, ...])
+def get_as_filed(
+    cik: int,
+    form: str = Query("10-K"),
+    accession: str | None = Query(None, description="Defaults to the most recent filing"),
+    service: EntityService = Depends(get_service),
+    as_filed: AsFiledService = Depends(get_as_filed_service),
+) -> tuple[s.AsFiledStatementOut, ...]:
+    """Every primary statement in a filing, exactly as the filer presented it."""
+    registrant = _resolve_registrant(service, cik)
+    try:
+        filing = _latest_filing(as_filed, registrant, form, accession)
+        reports = as_filed.statement_index(filing)
+        return tuple(
+            _as_filed_out(as_filed.statement(filing, report), report, filing)
+            for report in reports
+        )
+    except EdgarError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+def _as_filed_out(statement, report, filing) -> s.AsFiledStatementOut:
+    return s.AsFiledStatementOut(
+        title=statement.title,
+        # The exhibit's own title, not FilingSummary's ShortName, which the
+        # SEC's renderer sometimes emits with characters already replaced by
+        # question marks.
+        short_name=statement.display_name or report.short_name,
+        columns=statement.columns,
+        column_dates=tuple(d.isoformat() if d else None for d in statement.column_dates),
+        rows=tuple(
+            s.AsFiledRowOut(
+                label=row.label,
+                element=row.element,
+                tag=row.tag,
+                is_abstract=row.is_abstract,
+                is_total=row.is_total,
+                indent=row.indent,
+                values={col: format(val, "f") for col, val in row.values.items()},
+            )
+            for row in statement.rows
+        ),
+        monetary_scale=format(statement.monetary_scale, "f"),
+        share_scale=format(statement.share_scale, "f"),
+        accession=filing.accession,
+        form=filing.form,
+        filed=filing.filed.isoformat(),
+        source_url=f"{filing.base_url}/{report.filename}",
     )
