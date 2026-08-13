@@ -1,63 +1,58 @@
 # Roadmap
 
-Running list of what we want to build. Newest thinking at the top of each
-section. See [docs/architecture.md](docs/architecture.md) for how the built
-parts work and why.
+Running list of what we want to build. See
+[docs/architecture.md](docs/architecture.md) for how the built parts work and
+why.
 
 Status key: **next** = actively queued · **planned** = agreed, not started ·
-**idea** = worth considering, not committed
+**idea** = worth considering, not committed · **dropped** = decided against,
+with the reason kept
 
 ---
 
 ## Statement rendering
 
-- **next** — **Canonical statement view.** Three layouts (income statement,
-  balance sheet, cash flow) rendered from the ledger with our own ordering,
-  indentation and subtotals. Identical across every company so two filers can be
-  compared without adapting to two house styles. Shows verification status
-  inline per line.
-  - Requires: `display_order` and `indent_level` on `ConceptMeta`.
-- **planned** — **"View as filed" toggle.** Render each company's own line
-  order, labels and subtotals, matching their actual statement. Source is the
-  SEC's own rendered exhibits (`FilingSummary.xml` → `R*.htm`), which we
-  confirmed are available per filing.
-  - Doubles as the provenance click-through: "show me this number in the
-    source". Our view for reading and analysis; theirs for verifying.
-  - Note: rendering our own numbers in a document-shaped container is *not*
-    provenance. The link to the SEC's exhibit is what makes the claim real.
+- **done** — **As-filed statement view.** Each filing's statements rendered
+  exactly as the filer laid them out, parsed from the SEC's own exhibits
+  (`FilingSummary.xml` → `R*.htm`). Correct line order, the filer's own labels,
+  section headings, hierarchy, and only statement-face items.
+  - This is the primary display path. It also *is* the provenance
+    click-through: the same exhibit the number came from.
+- **done** — **Canonical statement view.** Three layouts rendered from the
+  ledger with our own ordering, indentation and subtotals, identical across
+  every company.
+  - Repositioned: no longer a display surface. It exists to feed charts, time
+    series and cross-company comparison, all of which need one consistent shape
+    that as-filed rendering cannot provide.
 
 ## Coverage: industries and tags
 
-- **next** — **Widen the tag map for commercial filers.** Driven by
-  `scripts/tag_frequency.py` output rather than guesswork.
-- **planned** — **Bank template (Reg S-X Article 9).** Banks have no operating
-  cycle, so no current/non-current split and no gross profit — an unclassified
-  balance sheet is a different template, not a variation. Needs ~30 statement-face
-  tags (`Deposits`, `InterestAndFeeIncomeLoansAndLeases`, `NoninterestIncome`,
-  `ProvisionForLoanLeaseAndOtherLosses`, …) and its own identity checks, e.g.
-  net interest income = interest income − interest expense.
-  - Until built, banks must be **detected and disclosed**, never forced into the
-    commercial template.
-- **planned** — **REIT template.** FFO/AFFO as the headline metric rather than
-  EPS; real estate at cost less accumulated depreciation.
-- **idea** — **Insurance template (Article 7).** Premiums earned, loss reserves,
-  float. Lower priority unless we specifically target the sector.
-- **next** — **DERA Financial Statement Data Sets.** The SEC's quarterly
-  research files include `pre.txt`, which marks each fact with the statement it
-  appears on (BS/IS/CF/EQ/CI) — the presentation information `companyfacts`
-  lacks.
-  - Build-time only: download once, produce a static dict, discard. Never a
-    runtime dependency.
-  - **Dropped.** `pre.txt` exists to say which tags belong on which statement,
-    in what order. The R-files answer exactly that, per filing, from a source
-    already being fetched � so the bulk research dataset earns nothing.
-  - Hand curation cannot close that gap efficiently. Ranking unmapped tags by
-    how many companies report them returns almost entirely footnote schedules —
-    `DeferredTaxAssets*`, `LesseeOperatingLeaseLiabilityPaymentsDue*`,
-    `FiniteLivedIntangibleAssetsAmortizationExpense*` — none of which appear on
-    the face of a statement. Filtering to balance sheet instants does not
-    separate them. `pre.txt` answers definitively what ranking by frequency
-    cannot.
+- **planned** — **Widen the tag map, retargeted.** The goal is no longer "cover
+  every statement line", which is unbounded — every filer has an idiosyncratic
+  line or two. Display comes from as-filed rendering, so the canonical map only
+  needs the concepts the **metrics** consume: revenue, COGS, gross profit, opex,
+  operating income, net income, EPS, shares, cash, receivables, inventory,
+  payables, debt, equity, total assets, operating cash flow, capex. Roughly
+  40–50 concepts, most already mapped. Finishable, unlike the previous target.
+- **planned** — **Bank analytics (Reg S-X Article 9).** No longer needed for
+  *display*: JPMorgan renders correctly as filed, with its own lines — deposits,
+  securities borrowed, held-to-maturity securities, beneficial interests issued
+  by consolidated VIEs — and no bank-specific vocabulary at all.
+  - Still needed for **analytics**, where one consistent shape is required: net
+    interest margin, efficiency ratio, capital ratios. Shape detection already
+    gates this, so banks are disclosed rather than given commercial ratios.
+- **planned** — **REIT analytics.** FFO/AFFO as the headline measure rather than
+  EPS, because GAAP depreciation on real estate understates the economics.
+- **idea** — **Insurer analytics (Article 7).** Combined ratio, reserve
+  adequacy, float.
+- **dropped** — **DERA Financial Statement Data Sets.** `pre.txt` exists to say
+  which tags belong on which statement, in what order. The R-files answer
+  exactly that, per filing, from a source already being fetched — so the bulk
+  research dataset earns nothing.
+  - The coverage problem it was meant to solve also dissolved: as filed, a line
+    like Apple's $33bn "Vendor non-trade receivables" simply appears rather than
+    needing to be mapped. That single line was the whole shortfall in Apple's
+    current-assets subtotal.
 
 ## Known data problems
 
@@ -69,19 +64,33 @@ Status key: **next** = actively queued · **planned** = agreed, not started ·
   count from a pre-split one. Apple's 2020 4-for-1 split: 4.77B shares reported
   in the Q1 10-Q vs 19.07B restated. Affects EPS and all share counts.
 - **planned** — **Predecessor entity discovery.** A ticker resolves to whichever
-  CIK currently holds it; after a reorganisation that is the new holding company.
-  `XOM` → "ExxonMobil Holdings Corp" (1.5y of history) rather than CIK 34088
-  (19.2y). Currently detected via `looks_truncated` and worked around with
-  `registrant_for_cik`. Should suggest the predecessor automatically.
-- **planned** — **Bank/insurer detection.** Identify the filer's statement shape
-  from its tag profile so the right template and check set are selected.
+  CIK currently holds it; after a reorganisation that is the new holding
+  company. `XOM` → "ExxonMobil Holdings Corp" (1.5y of history) rather than CIK
+  34088 (19.2y). Detected today via `looks_truncated` and worked around with
+  `registrant_for_cik`; should suggest the predecessor automatically.
+
+## Validation, repositioned
+
+Validation guards **our transformations**, not the filers' books. On the XBRL
+path the values are filer-tagged in an audited submission, so there is no
+extraction step and no hallucination surface. Every bug these checks have caught
+so far was ours: `ProfitLoss` vs `NetIncomeLoss`, `CostsAndExpenses` including
+COGS, fiscal-year labelling, and a period-key collision.
+
+- **planned** — Stop reporting `verified_ratio` on as-filed statements. It is
+  meaningless there: the exhibit *is* the filing.
+- **planned** — Report corroboration on **derived metrics** instead, where
+  splicing a series across three tags or mis-mapping COGS is a real risk that
+  belongs to us.
+- Becomes load-bearing again for the PDF path and for chat grounding, where a
+  model produces numbers and can genuinely get them wrong.
 
 ## Persistence
 
 - **planned** — **Two-layer storage.**
-  1. Raw `companyfacts` payloads cached verbatim (`JSONB` or on disk). Lets us
-     re-derive every fact after a tag-mapping fix without re-fetching from SEC —
-     which is how the mapping bugs found so far were iterated on.
+  1. Raw `companyfacts` payloads and R-files cached verbatim (`JSONB` or on
+     disk). Lets every fact be re-derived after a mapping fix without
+     re-fetching — which is how each mapping bug so far was iterated on.
   2. Derived facts in a normalised table, indexed on
      `(entity_id, concept, period)`, for analytics and charts.
   - **Money columns must be `NUMERIC`, never `float`/`double precision`.** A
@@ -99,13 +108,15 @@ Status key: **next** = actively queued · **planned** = agreed, not started ·
 
 ## Canvas and UI
 
-- **planned** — Infinite pan/zoom canvas (`@xyflow/react`), black/glass
-  aesthetic, statements and charts as draggable nodes.
-- **planned** — Ticker search that seeds a starter board.
+- **next** — Infinite pan/zoom canvas (`@xyflow/react`), black/glass aesthetic,
+  statements and charts as draggable nodes.
+- **next** — Ticker search that seeds a starter board.
+- **planned** — Statement node rendering as-filed, with a link to the SEC
+  exhibit the numbers came from.
 - **planned** — Reconciliation panel: which identities passed, failed or could
   not be evaluated, and the unexplained residual where a subtotal fell short.
-- **planned** — Click a figure → highlight its line in the statement → open the
-  source filing.
+- **idea** — Toggle between as-filed and canonical views, for comparing two
+  companies side by side.
 
 ## Later
 
