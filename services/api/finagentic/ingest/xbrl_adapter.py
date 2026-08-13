@@ -139,15 +139,72 @@ def entity_id_for(registrant: Registrant) -> UUID:
     return uuid5(ENTITY_NAMESPACE, f"cik:{registrant.cik}")
 
 
-def infer_period(obs: XbrlObservation) -> Period | None:
+@dataclass(frozen=True, slots=True)
+class FilingContext:
+    """What one filing's own reporting period was.
+
+    EDGAR stamps every row in a filing with that *filing's* fiscal year, not the
+    fiscal year of the value. A FY2025 10-K carries FY2024 and FY2023
+    comparatives, and all three arrive tagged `fy=2025`. Taking that field at
+    face value labels a 2018 fiscal year as FY2020.
+
+    The filing's own period is recoverable: it is the latest date any row in the
+    filing refers to. Every earlier period in the same filing is a comparative,
+    offset by whole years, so its label can be derived by counting back.
+    """
+
+    fiscal_year: int
+    period_end: date
+
+
+def build_filing_contexts(
+    observations: list[XbrlObservation],
+) -> dict[str, FilingContext]:
+    """Map each accession to the reporting period of the filing it came from."""
+    latest_end: dict[str, date] = {}
+    declared_year: dict[str, int] = {}
+
+    for obs in observations:
+        if obs.end > latest_end.get(obs.accession, date.min):
+            latest_end[obs.accession] = obs.end
+        if obs.fiscal_year is not None:
+            declared_year.setdefault(obs.accession, obs.fiscal_year)
+
+    return {
+        accession: FilingContext(
+            fiscal_year=declared_year.get(accession, end.year),
+            period_end=end,
+        )
+        for accession, end in latest_end.items()
+    }
+
+
+def _fiscal_year_for(obs: XbrlObservation, context: FilingContext | None) -> int:
+    """The fiscal year a value belongs to, not the one its filing belongs to.
+
+    Counting whole years back from the filing's own period end respects the
+    company's labelling convention -- a January year-end that the filer calls
+    FY2025 stays FY2025 -- without inheriting the filing's year wholesale.
+    """
+    if context is None:
+        return obs.fiscal_year if obs.fiscal_year is not None else obs.end.year
+
+    years_back = round((context.period_end - obs.end).days / 365.25)
+    return context.fiscal_year - years_back
+
+
+def infer_period(
+    obs: XbrlObservation,
+    context: FilingContext | None = None,
+) -> Period | None:
     """Derive a `Period` from an observation's dates.
 
-    Dates are treated as authoritative and the filing's own fiscal-period label
-    as a hint, because the label is absent on older filings and is occasionally
-    wrong -- whereas the dates come from the same XBRL context that produced the
+    Dates are authoritative and the filing's fiscal-period label is a hint: the
+    label is absent on older filings and describes the filing rather than the
+    value, whereas the dates come from the same XBRL context that produced the
     value itself.
     """
-    fiscal_year = obs.fiscal_year if obs.fiscal_year is not None else obs.end.year
+    fiscal_year = _fiscal_year_for(obs, context)
 
     if obs.is_instant:
         # Instants carry no span to classify, so the filing's label is the only
@@ -229,6 +286,10 @@ def to_facts(
     """Adapt raw observations into a reconciled `FactSet`."""
     entity_id = entity_id_for(registrant)
 
+    # The filing each observation came from determines how its fiscal-year label
+    # is derived, so contexts are built before any observation is placed.
+    contexts = build_filing_contexts(observations)
+
     counters: dict[str, int] = defaultdict(int)
     # Keyed by the ledger slot a fact would occupy; several observations compete
     # for each, and the winner is chosen once all candidates are known.
@@ -253,7 +314,7 @@ def to_facts(
             counters["skipped_dimensional"] += 1
             continue
 
-        period = infer_period(obs)
+        period = infer_period(obs, contexts.get(obs.accession))
         if period is None or period.kind is not meta(concept).period_kind:
             counters["skipped_unresolvable_period"] += 1
             continue

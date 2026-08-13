@@ -308,5 +308,10 @@ def test_a_quarter_is_not_comparable_to_a_year(fy2024):
 
 
 def test_prior_year_steps_back_one_fiscal_year(fy2024):
-    assert fy2024.prior_year().fiscal_year == 2023
-    assert fy2024.prior_year().fiscal_period is FiscalPeriod.FY
+    prior = fy2024.prior_year()
+    assert prior.fiscal_year == 2023
+    assert prior.fiscal_period is FiscalPeriod.FY
+    # The dates must move backwards too, not just the label. Shifting forwards
+    # would silently compare a period against its successor.
+    assert prior.end_date < fy2024.end_date
+    assert prior.start_date is not None and prior.start_date < fy2024.start_date

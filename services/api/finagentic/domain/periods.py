@@ -148,7 +148,7 @@ class Period(BaseModel):
         The result is a *query template*: it locates the comparable period by
         `fiscal_year` and `fiscal_period`, and its dates are approximate.
         """
-        shift = 364
+        shift = -364
         return Period(
             kind=self.kind,
             fiscal_year=self.fiscal_year - 1,
