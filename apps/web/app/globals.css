@@ -1,0 +1,108 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+@theme {
+  /* Near-black rather than #000: pure black makes the glass panels read as
+     cut-outs instead of surfaces, because there is nothing behind them for the
+     blur to pick up. */
+  --color-void: #06070a;
+  --color-surface: #0b0d12;
+
+  --color-hairline: #1b1f28;
+  --color-ink: #e8eaf0;
+  --color-ink-muted: #8b91a1;
+  --color-ink-faint: #5a6072;
+
+  --color-accent: #7c8cff;
+  --color-positive: #4ade80;
+  --color-negative: #fb7185;
+
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Statement columns only line up if the digits are the same width. Without
+   this, every figure in a column sits at a slightly different offset and the
+   table stops reading as a table. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@utility glass {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.015)),
+    rgb(11 13 18 / 0.72);
+  backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 0.05) inset,
+    0 18px 50px -12px rgb(0 0 0 / 0.75);
+}
+
+/* ---- react-flow -------------------------------------------------------- */
+
+.react-flow {
+  --xy-background-color: var(--color-void);
+  --xy-edge-stroke-default: #2a3040;
+  --xy-edge-stroke-selected-default: var(--color-accent);
+}
+
+.react-flow__node {
+  /* The nodes bring their own chrome; react-flow's default card would sit
+     underneath it as a second, differently-coloured border. */
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+}
+
+.react-flow__node.selected .glass-frame {
+  border-color: rgb(124 140 255 / 0.55);
+}
+
+.react-flow__attribution {
+  background: transparent;
+  color: var(--color-ink-faint);
+  font-size: 10px;
+}
+
+.react-flow__controls-button {
+  background: rgb(20 23 31 / 0.9);
+  border-bottom: 1px solid var(--color-hairline);
+  fill: var(--color-ink-muted);
+}
+
+.react-flow__controls-button:hover {
+  background: rgb(30 34 45 / 0.95);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.09);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.16);
+  background-clip: content-box;
+}

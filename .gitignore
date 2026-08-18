@@ -18,15 +18,33 @@ out/
 dist/
 *.tsbuildinfo
 
-# Env / secrets
+# Env / secrets -- never commit a real credential, even to a private repo
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+credentials.json
+service-account*.json
+.netrc
 
 # Local data
 storage/
 *.db
 *.sqlite3
+# Raw EDGAR payloads, re-fetchable and hundreds of MB
+.edgar_cache/
+
+# Internal planning, kept local
+ROADMAP.md
+
+# Agent / editor scratch
+.claude/
+*.local
+scratch/
 
 # Editor / OS
 .DS_Store

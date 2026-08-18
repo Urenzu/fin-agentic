@@ -12,7 +12,8 @@ class Settings(BaseSettings):
 
     #: The SEC blocks clients that do not identify themselves, and asks that the
     #: value name a real contact. See https://www.sec.gov/os/webmaster-faq#developers
-    sec_user_agent: str = "fin-agentic (contact: levirankin1@gmail.com)"
+    #: Set FINAGENTIC_SEC_USER_AGENT to your own address before fetching.
+    sec_user_agent: str = "fin-agentic (contact: set FINAGENTIC_SEC_USER_AGENT)"
 
     #: Where raw EDGAR payloads are cached. Keeping them means a tag-map fix can
     #: be re-applied to every company without re-fetching several MB each.

@@ -34,7 +34,8 @@ SEC_DATA_BASE = "https://data.sec.gov"
 
 #: The SEC blocks clients that do not identify themselves. This must name a real
 #: contact -- see https://www.sec.gov/os/webmaster-faq#developers
-DEFAULT_USER_AGENT = "fin-agentic (contact: levirankin1@gmail.com)"
+#: Override with FINAGENTIC_SEC_USER_AGENT rather than editing this default.
+DEFAULT_USER_AGENT = "fin-agentic (contact: set FINAGENTIC_SEC_USER_AGENT)"
 
 #: SEC asks for no more than 10 requests/second. We stay well under.
 MIN_REQUEST_INTERVAL_SECONDS = 0.15
