@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import {
   Handle,
   NodeResizer,
@@ -60,7 +60,7 @@ function isShareCount(element: string | null): boolean {
   return element !== null && /[Ss]hares/.test(element) && !isPerShare(element);
 }
 
-export function StatementNode({ id, data, selected, width, height }: NodeProps<StatementNodeType>) {
+export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>) {
   const { statement, company, ticker } = data;
   const { setNodes } = useReactFlow();
   const scroller = useRef<HTMLDivElement>(null);
@@ -70,25 +70,6 @@ export function StatementNode({ id, data, selected, width, height }: NodeProps<S
   // dragged taller would still budget its summary for the old size.
   const nodeHeight = height ?? statementNodeHeight(statement);
   const defaultHeight = statementNodeHeight(statement);
-
-  /**
-   * How much of the statement is out of view, measured rather than estimated.
-   *
-   * Node sizes are declared everywhere else precisely so nothing depends on
-   * the DOM having been measured yet. This is the one place that cannot work
-   * that way: the row estimate assumes one line per label, and a balance sheet
-   * whose labels wrap to two runs hundreds of pixels taller than the arithmetic
-   * predicts. Expanding to the estimate left the reader still scrolling, which
-   * is the entire thing the control exists to stop. Reading it back from the
-   * element is exact, and by the time anyone can click, the element is there.
-   */
-  const [hidden, setHidden] = useState(0);
-  useEffect(() => {
-    const element = scroller.current;
-    setHidden(element ? element.scrollHeight - element.clientHeight : 0);
-  }, [nodeHeight, width, statement]);
-
-  const fitted = hidden <= 1;
 
   // Both selectors collapse a continuous zoom to a value that changes a
   // handful of times, so this node re-renders on a step boundary rather than
@@ -111,9 +92,17 @@ export function StatementNode({ id, data, selected, width, height }: NodeProps<S
   /**
    * Grow the panel until nothing is hidden, or put it back to the default.
    *
-   * Re-measures on the click rather than trusting the value in state, so the
-   * result is right even if the reader has just dragged the node narrower and
-   * pushed more labels onto a second line.
+   * Bound to a double click on the header rather than to a button, so it costs
+   * no pixels.
+   *
+   * The amount hidden is measured, not predicted. Node sizes are declared
+   * everywhere else precisely so nothing depends on the DOM having been
+   * measured yet, but the row estimate assumes one line per label, and a
+   * balance sheet whose labels wrap to two runs hundreds of pixels taller than
+   * the arithmetic predicts -- expanding to the estimate left the reader still
+   * scrolling. Reading it off the element is exact, and taking the measurement
+   * on each invocation keeps it right after the node has been dragged narrower
+   * and more labels have wrapped.
    */
   const toggleFit = () => {
     const element = scroller.current;
@@ -124,17 +113,10 @@ export function StatementNode({ id, data, selected, width, height }: NodeProps<S
 
   return (
     <>
-      {/* Only while the node is selected -- handles on every panel at once
-          would read as twelve nodes all mid-drag. Not offered in the far
-          tiers: there is nothing to scroll to when the table is not drawn,
-          and the handles would be the largest thing on the panel. */}
-      <NodeResizer
-        isVisible={selected === true && tier === "detail"}
-        minWidth={MIN_STATEMENT_WIDTH}
-        minHeight={MIN_STATEMENT_HEIGHT}
-        lineClassName="!border-transparent"
-        handleClassName="!h-2 !w-2 !rounded-sm !border !border-hairline-strong !bg-raised"
-      />
+      {/* Always live, so an edge can be grabbed without selecting the node
+          first. The controls draw nothing -- see the resize rules in
+          globals.css -- so the only affordance is the cursor changing shape. */}
+      <NodeResizer minWidth={MIN_STATEMENT_WIDTH} minHeight={MIN_STATEMENT_HEIGHT} />
       <Handle
         type="target"
         position={Position.Left}
@@ -146,48 +128,22 @@ export function StatementNode({ id, data, selected, width, height }: NodeProps<S
         eyebrow={summarised ? ticker : company}
         title={statement.short_name}
         scale={summarised ? scale : 1}
+        onDoubleClick={toggleFit}
         meta={
           <span className="tnum">
             {statement.form} &middot; filed {filed} &middot; {unitsCaption(monetaryExp)}
           </span>
         }
         action={
-          <div className="flex shrink-0 items-center gap-1.5">
-            {(hidden > 1 || nodeHeight > defaultHeight) && (
-              <button
-                type="button"
-                onClick={toggleFit}
-                title={
-                  fitted
-                    ? "Collapse to the default height"
-                    : "Grow the panel until every row is visible"
-                }
-                aria-label={fitted ? "Collapse statement" : "Expand statement to fit"}
-                className="nodrag rounded border border-hairline-strong px-1.5 py-1 text-ink-muted transition hover:border-ink-faint hover:text-ink"
-              >
-                <svg viewBox="0 0 12 12" className="h-3 w-3 fill-none stroke-current stroke-[1.4]">
-                  {fitted ? (
-                    <>
-                      <path d="M4.5 1.5v3h-3M7.5 10.5v-3h3" strokeLinecap="round" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M1.5 4.5v-3h3M10.5 7.5v3h-3" strokeLinecap="round" />
-                    </>
-                  )}
-                </svg>
-              </button>
-            )}
-            <a
-              href={statement.source_url}
-              target="_blank"
-              rel="noreferrer"
-              title="The SEC exhibit these numbers came from"
-              className="nodrag shrink-0 rounded border border-hairline-strong px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-ink-faint hover:text-ink"
-            >
-              SEC ↗
-            </a>
-          </div>
+          <a
+            href={statement.source_url}
+            target="_blank"
+            rel="noreferrer"
+            title="The SEC exhibit these numbers came from"
+            className="nodrag shrink-0 rounded border border-hairline-strong px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-ink-faint hover:text-ink"
+          >
+            SEC ↗
+          </a>
         }
       >
         {summarised ? (
@@ -209,13 +165,16 @@ export function StatementNode({ id, data, selected, width, height }: NodeProps<S
                   return (
                     <div key={index}>
                       <div
-                        className="truncate uppercase tracking-[0.1em] text-ink-faint"
-                        style={{ fontSize: `${9 * scale}px` }}
+                        className="eyebrow truncate text-ink-faint"
+                        style={{
+                          fontSize: `${8.5 * scale}px`,
+                          marginBottom: `${3 * scale}px`,
+                        }}
                       >
                         {row.label}
                       </div>
                       <div
-                        className={`tabular font-semibold leading-tight ${
+                        className={`tabular font-medium leading-none ${
                           raw.startsWith("-") ? "text-negative" : "text-ink"
                         }`}
                         style={{ fontSize: `${20 * scale}px` }}

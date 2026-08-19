@@ -17,6 +17,7 @@ export function NodeFrame({
   meta,
   action,
   scale = 1,
+  onDoubleClick,
   children,
 }: {
   eyebrow?: ReactNode;
@@ -24,6 +25,8 @@ export function NodeFrame({
   meta?: ReactNode;
   action?: ReactNode;
   scale?: number;
+  /** Double clicking the header fits the panel to its content. */
+  onDoubleClick?: () => void;
   children: ReactNode;
 }) {
   const far = scale > 1.15;
@@ -34,6 +37,7 @@ export function NodeFrame({
     // left to measure -- see statementNodeHeight.
     <div className="panel panel-frame relative flex h-full w-full flex-col overflow-hidden rounded-xl">
       <header
+        onDoubleClick={onDoubleClick}
         className="drag-handle flex cursor-grab items-start gap-3 border-b border-hairline active:cursor-grabbing"
         style={{ padding: `${12 * scale}px ${15 * scale}px ${11 * scale}px` }}
       >

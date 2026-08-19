@@ -115,10 +115,18 @@ function BoardInner() {
       setNodes((current) =>
         current.map((node) =>
           node.id === `entity-${entity.registrant.cik}`
-            ? // The card grows when ingestion replaces the placeholder text with
-              // a stat grid and any advisories, so its declared height has to
-              // move with it.
-              ({ ...node, height: entityNodeHeight(entity), data: { entity } } as BoardNode)
+            ? ({
+                ...node,
+                // The card grows when ingestion replaces the placeholder text
+                // with a stat grid and any advisories, so its declared height
+                // has to move with it -- unless the reader has already sized it
+                // themselves, in which case theirs wins.
+                height:
+                  node.type === "entity" && node.data.sized === true
+                    ? node.height
+                    : entityNodeHeight(entity),
+                data: { ...node.data, entity },
+              } as BoardNode)
             : node,
         ),
       );
@@ -196,6 +204,7 @@ function BoardInner() {
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
+        nodesConnectable={false}
         minZoom={0.15}
         maxZoom={2}
         proOptions={{ hideAttribution: false }}

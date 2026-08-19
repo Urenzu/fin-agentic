@@ -155,6 +155,72 @@ body {
   background: var(--color-surface);
 }
 
+/* Connection handles are decorative here -- edges are drawn by the board, not
+   by the reader -- and left interactive they claimed the middle of each side
+   edge with a crosshair, which is exactly where the resize strip needs to be. */
+.react-flow__handle,
+.react-flow__handle.connectionindicator {
+  pointer-events: none;
+  cursor: default;
+}
+
+/* ---- resizing ----------------------------------------------------------
+   Resizing is a cursor, not a control. React Flow draws a 1px line on each
+   edge and a 5px white square on each corner; both are made invisible here and
+   only their hit areas kept, so the affordance is the pointer changing shape
+   as it nears an edge and nothing is added to the panel.
+
+   Left and top straddle their edge evenly. Right and bottom are weighted
+   outward instead, because those are the edges the table's scrollbars live on
+   and a centred strip sat on top of them and made them impossible to grab. */
+
+/* Above the panel. The controls are rendered before it, so at equal stacking
+   they lost every hit test that landed inside the node -- only the sliver of
+   strip hanging outside the edge responded. */
+.react-flow__resize-control {
+  z-index: 5;
+}
+
+.react-flow__resize-control.line {
+  border-color: transparent;
+}
+
+.react-flow__resize-control.line.left,
+.react-flow__resize-control.line.right {
+  width: 10px;
+}
+
+.react-flow__resize-control.line.left {
+  transform: translate(-50%, 0);
+}
+
+.react-flow__resize-control.line.right {
+  transform: translate(-20%, 0);
+}
+
+.react-flow__resize-control.line.top,
+.react-flow__resize-control.line.bottom {
+  height: 10px;
+}
+
+.react-flow__resize-control.line.top {
+  transform: translate(0, -50%);
+}
+
+.react-flow__resize-control.line.bottom {
+  transform: translate(0, -20%);
+}
+
+/* Corners keep a square hit area so the diagonal cursors have somewhere to
+   live, but nothing is drawn. */
+.react-flow__resize-control.handle {
+  width: 12px;
+  height: 12px;
+  border-color: transparent;
+  background-color: transparent;
+  border-radius: 0;
+}
+
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;

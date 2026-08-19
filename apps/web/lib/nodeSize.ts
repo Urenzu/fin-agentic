@@ -64,6 +64,10 @@ export function overflowsDefault(statement: AsFiledStatement): boolean {
 
 export const ENTITY_NODE_WIDTH = 340;
 
+/** Enough for the header plus one row of the stat grid. */
+export const MIN_ENTITY_WIDTH = 200;
+export const MIN_ENTITY_HEIGHT = 120;
+
 const CHARS_PER_LINE = 52;
 const LINE_HEIGHT = 16;
 

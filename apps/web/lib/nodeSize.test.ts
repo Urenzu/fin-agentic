@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   clampSize,
+  MIN_ENTITY_HEIGHT,
+  MIN_ENTITY_WIDTH,
   DEFAULT_STATEMENT_HEIGHT,
   MIN_STATEMENT_HEIGHT,
   MIN_STATEMENT_WIDTH,
@@ -10,6 +12,8 @@ import {
   statementContentHeight,
   statementNodeHeight,
   statementNodeWidth,
+  ENTITY_NODE_WIDTH,
+  entityNodeHeight,
 } from "./nodeSize";
 import type { AsFiledRow, AsFiledStatement } from "./types";
 
@@ -109,4 +113,26 @@ test("clampSize survives a degenerate dimension", () => {
     const size = clampSize(bad, 120, 800);
     assert.ok(Number.isFinite(size) && size >= 120, `${bad} produced ${size}`);
   }
+});
+
+test("the entity card's resize floors stay under the size it opens at", () => {
+  // A floor above the natural height would make the card jump on first drag.
+  const ready = {
+    registrant: { cik: 320193, name: "Apple Inc.", ticker: "AAPL" },
+    state: "ready" as const,
+    shape: null,
+    coverage: {
+      history_years: 19.7,
+      annual_reports: 17,
+      fact_count: 3513,
+      verified_count: 1686,
+      earliest: "2006-09-30",
+      latest: "2026-06-27",
+      looks_truncated: false,
+    },
+    error: null,
+    advisories: [],
+  };
+  assert.ok(MIN_ENTITY_HEIGHT < entityNodeHeight(ready));
+  assert.ok(MIN_ENTITY_WIDTH < ENTITY_NODE_WIDTH);
 });
