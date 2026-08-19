@@ -4,7 +4,7 @@ import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/r
 
 import { NodeFrame } from "../NodeFrame";
 import { abbreviate, formatValue, scaleExponent } from "@/lib/decimal";
-import { fitScale, headlineCapacity, headlineRows, IDENTITY_BELOW, SUMMARY_BELOW } from "@/lib/lod";
+import { fitScale, headlineCapacity, headlineRows, tierFor } from "@/lib/lod";
 import type { AsFiledStatement } from "@/lib/types";
 
 export type StatementNodeData = {
@@ -77,7 +77,12 @@ function isShareCount(element: string | null): boolean {
 
 export function StatementNode({ data }: NodeProps<StatementNodeType>) {
   const { statement, company, ticker } = data;
-  const zoom = useStore((state) => state.transform[2]);
+  // Both selectors collapse a continuous zoom to a value that changes a
+  // handful of times, so this node re-renders on a step boundary rather than
+  // on every frame of a zoom gesture.
+  const nodeHeight = statementNodeHeight(statement);
+  const tier = useStore((state) => tierFor(state.transform[2]));
+  const scale = useStore((state) => fitScale(state.transform[2], nodeHeight, 0.4));
   const monetaryExp = scaleExponent(statement.monetary_scale);
   const shareExp = scaleExponent(statement.share_scale);
 
@@ -87,12 +92,8 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
     day: "numeric",
   });
 
-  // Bounded by the panel: a comprehensive-income statement can be short
-  // enough that an unbounded header would not leave room for the figures.
-  const nodeHeight = statementNodeHeight(statement);
-  const scale = fitScale(zoom, nodeHeight, 0.4);
-  const summarised = zoom < SUMMARY_BELOW;
-  const identityOnly = zoom < IDENTITY_BELOW;
+  const summarised = tier !== "detail";
+  const identityOnly = tier === "identity";
   const newest = statement.columns[0];
 
   return (
@@ -130,7 +131,8 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
           // by the handful of lines that carry the most meaning per pixel, set
           // large enough to read without zooming back in.
           <div
-            className="flex flex-1 flex-col justify-center overflow-hidden"
+            key={tier}
+            className="tier-fade flex flex-1 flex-col justify-center overflow-hidden"
             style={{ padding: `0 ${16 * scale}px`, gap: `${10 * scale}px` }}
           >
             {!identityOnly &&
@@ -167,7 +169,7 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
               )}
           </div>
         ) : (
-          <div className="nowheel nodrag overflow-auto">
+          <div key={tier} className="tier-fade nowheel nodrag overflow-auto">
             {/* `width` on a column is a hint, not a floor: a statement of
                 shareholders' equity carries headers like "ACCUMULATED OTHER
                 COMPREHENSIVE INCOME (LOSS)", and letting the table fit the

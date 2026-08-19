@@ -11,16 +11,53 @@
 import type { AsFiledRow, AsFiledStatement } from "./types";
 
 /**
- * Below this zoom the statement table is replaced by a summary.
+ * The magnifications a label is allowed to take.
  *
- * Picked from the row height: body rows are 23px, so at 0.55 they land near
- * 12.6 screen px, which is about where a dense table stops being legible and
- * starts being texture.
+ * The correction is quantised rather than applied continuously, and this is
+ * what makes zooming feel deliberate instead of noisy. Sized off `1/zoom`
+ * directly, every node re-laid its text on every frame of a zoom gesture --
+ * font size is not a composited property, so each change reflowed the panel
+ * and the text visibly crawled. Snapping to a handful of steps means the type
+ * holds still through most of a gesture and moves once, at a known place.
+ *
+ * It also makes the change collective. Bounded per node, a short card reached
+ * its limit at a different zoom than a tall one, so panels changed one after
+ * another and the board looked like it was rearranging itself at random.
  */
-export const SUMMARY_BELOW = 0.55;
+export const SCALE_STEPS = [1, 1.4, 2, 2.8, 3.6] as const;
 
-/** Below this, even the summary's figures go and only the identity remains. */
-export const IDENTITY_BELOW = 0.28;
+/** The largest step at or below `value`. */
+export function quantize(value: number, steps: readonly number[] = SCALE_STEPS): number {
+  let chosen = steps[0] ?? 1;
+  for (const step of steps) {
+    if (step <= value) chosen = step;
+  }
+  return chosen;
+}
+
+/**
+ * The zoom thresholds are derived from the steps rather than chosen alongside
+ * them, so a tier change and a magnification change are the same event. Picked
+ * independently they landed a little apart, and one gesture produced two pops.
+ */
+export const SUMMARY_BELOW = 1 / 2;
+export const IDENTITY_BELOW = 1 / 3.6;
+
+export type Tier = "detail" | "summary" | "identity";
+
+/**
+ * What a node should render at this zoom.
+ *
+ * Selecting on this rather than on the raw zoom is what stops a re-render on
+ * every frame: it collapses a continuous number to one of three values, so a
+ * store subscription only fires when the answer actually changes.
+ */
+export function tierFor(zoom: number): Tier {
+  if (!Number.isFinite(zoom) || zoom <= 0) return "identity";
+  if (zoom < IDENTITY_BELOW) return "identity";
+  if (zoom < SUMMARY_BELOW) return "summary";
+  return "detail";
+}
 
 /**
  * The multiplier that holds a label at a constant size on screen.
@@ -33,9 +70,19 @@ export const IDENTITY_BELOW = 0.28;
  * cap, a title at zoom 0.05 would be set at 240px and overflow the node it
  * belongs to.
  */
-export function counterScale(zoom: number, cap = 3.2): number {
+export function counterScale(zoom: number, cap = 3.6): number {
   if (!Number.isFinite(zoom) || zoom <= 0) return cap;
   return Math.min(Math.max(1 / zoom, 1), cap);
+}
+
+/**
+ * The correction a node should actually use: continuous, then snapped.
+ *
+ * Subscribe to this rather than to zoom. It changes a handful of times across
+ * the whole zoom range, so the text it sizes stays put in between.
+ */
+export function stepScale(zoom: number): number {
+  return quantize(counterScale(zoom));
 }
 
 /**
@@ -76,7 +123,9 @@ export function headlineRows(statement: AsFiledStatement, limit = 3): AsFiledRow
  */
 export function fitScale(zoom: number, nodeHeight: number, share = 0.5, headerHeight = 66): number {
   const affordable = (nodeHeight * share) / headerHeight;
-  return Math.max(Math.min(counterScale(zoom), affordable), 1);
+  // Bounded against the *stepped* correction, so the result changes only when
+  // the step does. Against the continuous one it drifted with every frame.
+  return Math.max(Math.min(stepScale(zoom), affordable), 1);
 }
 
 /** A headline block: its caption, its figure, and the gap beneath it. */

@@ -59,6 +59,29 @@ body {
   font-feature-settings: "tnum";
 }
 
+/* Softens the moment a node swaps what it renders. The swap itself is
+   instant -- the old content is gone from the tree -- so this is a fade in
+   rather than a crossfade, which is enough to stop it reading as a flicker.
+   Kept short: anything slower feels like the panel is loading. */
+@keyframes tier-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tier-fade {
+  animation: tier-fade 130ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tier-fade {
+    animation: none;
+  }
+}
+
 /* Small uppercase labels need tracking or they set as a solid block. */
 .eyebrow {
   text-transform: uppercase;

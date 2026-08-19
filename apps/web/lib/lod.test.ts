@@ -7,7 +7,11 @@ import {
   headlineCapacity,
   headlineRows,
   IDENTITY_BELOW,
+  quantize,
+  SCALE_STEPS,
+  stepScale,
   SUMMARY_BELOW,
+  tierFor,
 } from "./lod";
 import type { AsFiledRow, AsFiledStatement } from "./types";
 
@@ -42,7 +46,7 @@ function statement(rows: AsFiledRow[], columns = ["SEP. 27, 2025"]): AsFiledStat
 test("counterScale holds a label at constant screen size when zoomed out", () => {
   // A 12px label at zoom 0.5 renders at 6px; doubling it restores 12px.
   assert.equal(counterScale(0.5), 2);
-  assert.equal(counterScale(0.25), 3.2); // capped
+  assert.equal(counterScale(0.2), 3.6); // capped
 });
 
 test("counterScale does not shrink text when zoomed in past 1:1", () => {
@@ -51,7 +55,7 @@ test("counterScale does not shrink text when zoomed in past 1:1", () => {
 });
 
 test("counterScale caps the correction so titles cannot overflow their node", () => {
-  assert.equal(counterScale(0.01), 3.2);
+  assert.equal(counterScale(0.01), 3.6);
   assert.equal(counterScale(0.5, 1.5), 1.5);
 });
 
@@ -126,7 +130,7 @@ test("fitScale keeps a magnified header inside a short node", () => {
 });
 
 test("fitScale leaves a tall node free to use the full correction", () => {
-  assert.equal(fitScale(0.25, 560), counterScale(0.25));
+  assert.equal(fitScale(0.25, 560), stepScale(0.25));
 });
 
 test("fitScale never shrinks a node's header below its natural size", () => {
@@ -137,14 +141,14 @@ test("fitScale never shrinks a node's header below its natural size", () => {
 
 test("headlineCapacity shrinks as the correction grows", () => {
   const tall = 560;
-  assert.ok(headlineCapacity(tall, 1) > headlineCapacity(tall, 2.86));
+  assert.ok(headlineCapacity(tall, 1) > headlineCapacity(tall, 2.8));
 });
 
 test("headlineCapacity never reports room that would clip a figure", () => {
   // Swept at the scales the node actually uses -- fitScale is what decides the
   // correction, and it already refuses one the panel cannot afford.
   for (const height of [180, 300, 420, 560]) {
-    for (const zoom of [0.5, 0.4, 0.3, 0.2, 0.1]) {
+    for (const zoom of [0.49, 0.4, 0.3, 0.2, 0.1]) {
       const scale = fitScale(zoom, height, 0.4);
       const rows = headlineCapacity(height, scale);
       const used = (66 + 16) * scale + rows * 44 * scale;
@@ -155,4 +159,72 @@ test("headlineCapacity never reports room that would clip a figure", () => {
 
 test("headlineCapacity reports zero rather than a negative count", () => {
   assert.equal(headlineCapacity(120, 3.2), 0);
+});
+
+test("quantize snaps to the largest step at or below the value", () => {
+  assert.equal(quantize(1.0), 1);
+  assert.equal(quantize(1.39), 1);
+  assert.equal(quantize(1.4), 1.4);
+  assert.equal(quantize(99), 3.6);
+});
+
+test("quantize never returns a value above what was asked for", () => {
+  // Rounding up would magnify past the cap the geometry allows.
+  for (let v = 1; v <= 4; v += 0.05) {
+    assert.ok(quantize(v) <= v + 1e-9, `quantize(${v}) = ${quantize(v)}`);
+  }
+});
+
+test("stepScale only ever returns a declared step", () => {
+  for (let zoom = 0.05; zoom <= 2; zoom += 0.005) {
+    assert.ok(
+      (SCALE_STEPS as readonly number[]).includes(stepScale(zoom)),
+      `zoom ${zoom} produced ${stepScale(zoom)}`,
+    );
+  }
+});
+
+test("stepScale holds still across a zoom gesture", () => {
+  // The whole point: sweeping the usable zoom range must change the label size
+  // a handful of times, not on every frame. Sized off 1/zoom directly this
+  // would be ~390 distinct values, and the text crawled.
+  const seen = new Set<number>();
+  for (let zoom = 0.05; zoom <= 2; zoom += 0.005) seen.add(stepScale(zoom));
+  assert.ok(seen.size <= SCALE_STEPS.length, `${seen.size} distinct sizes`);
+});
+
+test("stepScale never grows as the board is zoomed in", () => {
+  let previous = Number.POSITIVE_INFINITY;
+  for (let zoom = 0.05; zoom <= 2; zoom += 0.005) {
+    const scale = stepScale(zoom);
+    assert.ok(scale <= previous + 1e-9, `scale rose at zoom ${zoom}`);
+    previous = scale;
+  }
+});
+
+test("every tier boundary coincides with a step change", () => {
+  // A tier change and a resize happening at slightly different zooms is what
+  // made one gesture produce two separate pops.
+  const epsilon = 1e-6;
+  for (const boundary of [SUMMARY_BELOW, IDENTITY_BELOW]) {
+    assert.notEqual(
+      stepScale(boundary - epsilon),
+      stepScale(boundary + epsilon),
+      `no step change at ${boundary}`,
+    );
+  }
+});
+
+test("tierFor sheds detail in one direction and covers the whole range", () => {
+  assert.equal(tierFor(1), "detail");
+  assert.equal(tierFor(SUMMARY_BELOW), "detail");
+  assert.equal(tierFor(SUMMARY_BELOW - 1e-6), "summary");
+  assert.equal(tierFor(IDENTITY_BELOW), "summary");
+  assert.equal(tierFor(IDENTITY_BELOW - 1e-6), "identity");
+});
+
+test("tierFor survives a degenerate zoom", () => {
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.ok(["detail", "summary", "identity"].includes(tierFor(bad)));
+  }
 });

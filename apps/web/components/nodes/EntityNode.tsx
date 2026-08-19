@@ -3,7 +3,7 @@
 import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
 
 import { NodeFrame } from "../NodeFrame";
-import { fitScale, IDENTITY_BELOW, SUMMARY_BELOW } from "@/lib/lod";
+import { fitScale, tierFor } from "@/lib/lod";
 import type { Entity } from "@/lib/types";
 
 export type EntityNodeData = {
@@ -60,12 +60,13 @@ const STATE_STYLES: Record<Entity["state"], string> = {
 export function EntityNode({ data }: NodeProps<EntityNodeType>) {
   const { entity } = data;
   const { registrant, coverage, shape } = entity;
-  const zoom = useStore((state) => state.transform[2]);
-
   const height = entityNodeHeight(entity);
-  const scale = fitScale(zoom, height);
-  const summarised = zoom < SUMMARY_BELOW;
-  const identityOnly = zoom < IDENTITY_BELOW;
+  // See StatementNode: selecting the stepped value rather than the raw zoom is
+  // what keeps this off the per-frame render path.
+  const tier = useStore((state) => tierFor(state.transform[2]));
+  const scale = useStore((state) => fitScale(state.transform[2], height));
+  const summarised = tier !== "detail";
+  const identityOnly = tier === "identity";
 
   // The shape line names what kind of filer this is; the advisory explains the
   // consequence. Prefixing keeps the label without repeating the explanation.
@@ -81,7 +82,7 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
     // distance, and leave the ticker clipped.
     return (
       <>
-        <div className="panel panel-frame drag-handle flex h-full w-full cursor-grab items-center justify-center overflow-hidden rounded-xl px-3">
+        <div className="panel panel-frame tier-fade drag-handle flex h-full w-full cursor-grab items-center justify-center overflow-hidden rounded-xl px-3">
           <span
             className="font-semibold leading-none tracking-tight text-ink"
             style={{ fontSize: `${Math.min(height * 0.42, 88)}px` }}
@@ -117,7 +118,10 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
           // The anchor of the row. At a distance the ticker is the only thing
           // that has to survive -- it is how a reader tells which band of the
           // board belongs to which company.
-          <div className="flex flex-1 items-center justify-center overflow-hidden px-4">
+          <div
+            key={tier}
+            className="tier-fade flex flex-1 items-center justify-center overflow-hidden px-4"
+          >
             <span
               className="font-semibold leading-none tracking-tight text-ink"
               style={{ fontSize: `${Math.min(34 * scale, height - 66 * scale - 16)}px` }}
@@ -126,7 +130,7 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
             </span>
           </div>
         ) : (
-          <div className="nowheel overflow-auto px-4 py-3">
+          <div key={tier} className="tier-fade nowheel overflow-auto px-4 py-3">
             {coverage ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                 <Stat label="History" value={`${coverage.history_years.toFixed(1)} yrs`} />
