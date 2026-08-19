@@ -109,7 +109,7 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
         title={statement.short_name}
         scale={summarised ? scale : 1}
         meta={
-          <span className="tabular">
+          <span className="tnum">
             {statement.form} &middot; filed {filed} &middot; {unitsCaption(monetaryExp)}
           </span>
         }
@@ -181,13 +181,18 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
               <thead className="sticky top-0 z-10 bg-surface">
                 <tr>
                   <th
-                    className="border-b border-hairline px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-ink-faint"
+                    className="border-b border-hairline px-4 pb-2 pt-3 text-left"
                     style={{ width: LABEL_COLUMN, minWidth: LABEL_COLUMN }}
                   />
-                  {statement.columns.map((column) => (
+                  {statement.columns.map((column, columnIndex) => (
                     <th
                       key={column}
-                      className="whitespace-nowrap border-b border-hairline px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-ink-muted"
+                      // The newest period is the one being read; the
+                      // comparatives are context. Giving them all equal weight
+                      // is what made the table a wall of identical figures.
+                      className={`eyebrow whitespace-nowrap border-b border-hairline px-3 pb-2 pt-3 text-right text-[9.5px] ${
+                        columnIndex === 0 ? "text-ink-muted" : "text-ink-faint"
+                      }`}
                       style={{ width: VALUE_COLUMN, minWidth: VALUE_COLUMN }}
                     >
                       {column}
@@ -208,7 +213,7 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
                       <tr key={index}>
                         <td
                           colSpan={statement.columns.length + 1}
-                          className="px-4 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint"
+                          className="eyebrow px-4 pb-1.5 pt-5 text-[9.5px] text-ink-faint"
                           style={{ paddingLeft: 16 + row.indent * INDENT_STEP }}
                         >
                           {row.label}
@@ -220,25 +225,28 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
                   return (
                     <tr
                       key={index}
-                      className={
+                      className={`transition-colors hover:bg-white/[0.035] ${
                         row.is_total
-                          ? "border-t border-hairline-strong font-semibold text-ink"
-                          : "text-ink-muted hover:bg-white/[0.04]"
-                      }
+                          ? "border-t border-hairline-strong font-medium text-ink"
+                          : "text-ink-muted"
+                      }`}
                     >
                       <td
-                        className="py-[5px] pr-3 leading-snug"
+                        className="py-[5px] pr-4 leading-snug"
                         style={{ paddingLeft: 16 + row.indent * INDENT_STEP }}
                         title={row.tag ?? undefined}
                       >
                         {row.label}
                       </td>
-                      {statement.columns.map((column) => {
+                      {statement.columns.map((column, columnIndex) => {
                         const value = row.values[column];
+                        const negative = value !== undefined && value.startsWith("-");
                         return (
                           <td
                             key={column}
-                            className="tabular whitespace-nowrap px-3 py-[5px] text-right"
+                            className={`tabular whitespace-nowrap px-3 py-[5px] text-right ${
+                              columnIndex === 0 || row.is_total ? "" : "text-ink-faint"
+                            }`}
                           >
                             {value === undefined ? (
                               // Blank on the face of the statement means the
@@ -252,7 +260,7 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
                               // Per-share amounts are pinned to two places so a
                               // $7.40 EPS does not render as "7.4" beside a
                               // "7.46".
-                              <span className={value.startsWith("-") ? "text-negative" : undefined}>
+                              <span className={negative ? "text-negative" : undefined}>
                                 {formatValue(value, scaleExp, {
                                   parens: true,
                                   dp: isPerShare(row.element) ? 2 : undefined,

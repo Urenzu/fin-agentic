@@ -40,8 +40,8 @@ export function entityNodeHeight(entity: Entity): number {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
-      <div className="tabular mt-0.5 text-[13px] font-semibold text-ink">{value}</div>
+      <div className="eyebrow text-[9px] text-ink-faint">{label}</div>
+      <div className="tabular mt-1 text-[13px] font-medium text-ink">{value}</div>
     </div>
   );
 }
@@ -52,8 +52,8 @@ function Stat({ label, value }: { label: string; value: string }) {
  * state that has to interrupt the reader.
  */
 const STATE_STYLES: Record<Entity["state"], string> = {
-  ingesting: "border-hairline-strong text-ink-faint",
-  ready: "border-hairline-strong text-ink-muted",
+  ingesting: "border-hairline text-ink-faint",
+  ready: "border-hairline text-ink-faint",
   error: "border-negative/40 text-negative",
 };
 
@@ -81,7 +81,7 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
     // distance, and leave the ticker clipped.
     return (
       <>
-        <div className="panel panel-frame drag-handle flex h-full w-full cursor-grab items-center justify-center overflow-hidden rounded-lg px-3">
+        <div className="panel panel-frame drag-handle flex h-full w-full cursor-grab items-center justify-center overflow-hidden rounded-xl px-3">
           <span
             className="font-semibold leading-none tracking-tight text-ink"
             style={{ fontSize: `${Math.min(height * 0.42, 88)}px` }}
@@ -107,7 +107,7 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
         meta={registrant.ticker || undefined}
         action={
           <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${STATE_STYLES[entity.state]}`}
+            className={`eyebrow shrink-0 rounded-full border px-2 py-[3px] text-[8.5px] ${STATE_STYLES[entity.state]}`}
           >
             {entity.state}
           </span>
@@ -161,7 +161,7 @@ export function EntityNode({ data }: NodeProps<EntityNodeType>) {
             {advisories.map((advisory) => (
               <p
                 key={advisory.key}
-                className="mt-3 rounded border border-caution/25 bg-caution/[0.07] px-3 py-2 text-[11px] leading-relaxed text-caution"
+                className="mt-3 rounded-lg border border-caution/20 bg-caution/[0.06] px-3 py-2 text-[11px] leading-relaxed text-caution/90"
               >
                 {advisory.label && (
                   <span className="mr-1.5 font-semibold uppercase tracking-wide">

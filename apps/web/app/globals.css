@@ -2,34 +2,30 @@
 @import "@xyflow/react/dist/style.css";
 
 @theme {
-  /* A neutral grey ramp with no hue in it. The previous palette was tinted
-     blue and paired with a violet accent, which is the look every generated
-     dashboard has. Financial statements are dense black-on-white documents;
-     the chrome should stay out of the way and let the only colour on screen
-     mean something. */
-  --color-void: #0d0d0d;
-  --color-surface: #171717;
-  --color-raised: #212121;
-  --color-hairline: #2f2f2f;
-  --color-hairline-strong: #414141;
+  /* A near-neutral ramp carrying a trace of blue. Dead grey (#171717 on
+     #0d0d0d) is what made the panels look muddy: with no hue at all, the only
+     difference between two surfaces is lightness, and at these values that
+     reads as dirt rather than as depth. A few points of chroma give the greys
+     somewhere to sit while staying black-and-white to the eye. */
+  --color-void: #08080a;
+  --color-surface: #101014;
+  --color-raised: #16161b;
+  --color-hairline: #232329;
+  --color-hairline-strong: #34343d;
 
-  --color-ink: #f2f2f2;
-  --color-ink-muted: #b4b4b4;
-  /* Lifted well above the old #5a6072. Labels at this level are read at a
-     glance across a whole statement, and the old value failed contrast once
-     the canvas was zoomed out at all. */
-  --color-ink-faint: #8f8f8f;
+  --color-ink: #fafafa;
+  --color-ink-muted: #a2a2ad;
+  --color-ink-faint: #77777f;
 
-  /* Colour is reserved for meaning, never decoration:
-     negative -> a figure the filer printed in parentheses
-     caution  -> an advisory that could make wrong output look right
-     There is deliberately no brand accent. Emphasis is done with weight and
-     white, the way a printed statement does it. */
-  --color-negative: #e2685c;
-  --color-caution: #d8a657;
+  /* Colour is reserved for meaning, never decoration. The negative is
+     deliberately soft: it lands on roughly every fifth figure, and at full
+     saturation a statement reads as an error log. It only has to be
+     distinguishable from the ink beside it, not loud. */
+  --color-negative: #d0837c;
+  --color-caution: #c9a227;
 
-  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono-figures), ui-monospace, "Cascadia Mono", monospace;
 }
 
 html,
@@ -38,34 +34,55 @@ body {
   background: var(--color-void);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  /* cv11 gives Inter a single-storey `a`... but more usefully ss01 aligns the
+     `1` so it does not read as a serif in a column of figures. */
+  font-feature-settings: "ss01", "cv05";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Statement columns only line up if the digits are the same width. Without
    this, every figure in a column sits at a slightly different offset and the
    table stops reading as a table. */
 .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.03em;
+}
+
+/* Even digit widths without changing typeface. For running text that happens
+   to contain a number -- a filing date, a coverage range -- where switching to
+   the mono face would make the line shout. */
+.tnum {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
-/* Flat, opaque, one hairline border. Replaces the old `glass` utility: a
-   backdrop blur over a dark canvas buys nothing visually, costs a compositor
-   pass per node, and was the single biggest tell of the generated look. Opaque
-   panels also keep statement text at full contrast instead of letting the dot
-   grid show through the numbers. */
+/* Small uppercase labels need tracking or they set as a solid block. */
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+}
+
+/* One flat surface, one hairline, one soft shadow. The header is separated by
+   a rule rather than by its own fill: two stacked greys made every node read
+   as a box inside a box. */
 @utility panel {
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
-  box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.8);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.4),
+    0 12px 32px -16px rgb(0 0 0 / 0.9);
 }
 
 /* ---- react-flow -------------------------------------------------------- */
 
 .react-flow {
   --xy-background-color: var(--color-void);
-  --xy-edge-stroke-default: #3a3a3a;
-  --xy-edge-stroke-selected-default: #7a7a7a;
+  --xy-edge-stroke-default: #2b2b33;
+  --xy-edge-stroke-selected-default: #55555f;
 }
 
 .react-flow__node {
@@ -87,18 +104,28 @@ body {
 
 .react-flow__attribution {
   background: transparent;
-  color: var(--color-ink-faint);
+  color: #3a3a42;
   font-size: 10px;
+}
+
+.react-flow__controls {
+  box-shadow: none;
 }
 
 .react-flow__controls-button {
   background: var(--color-raised);
-  border-bottom: 1px solid var(--color-hairline);
-  fill: var(--color-ink-muted);
+  border: 1px solid var(--color-hairline);
+  border-bottom-width: 0;
+  fill: var(--color-ink-faint);
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom-width: 1px;
 }
 
 .react-flow__controls-button:hover {
-  background: #2c2c2c;
+  background: #1f1f25;
+  fill: var(--color-ink);
 }
 
 .react-flow__minimap {
@@ -106,18 +133,18 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.12);
+  background: rgb(255 255 255 / 0.1);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.2);
   background-clip: content-box;
 }

@@ -32,27 +32,27 @@ export function NodeFrame({
   return (
     // Fills the node box, whose size react-flow is told up front rather than
     // left to measure -- see statementNodeHeight.
-    <div className="panel panel-frame relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+    <div className="panel panel-frame relative flex h-full w-full flex-col overflow-hidden rounded-xl">
       <header
-        className="drag-handle flex cursor-grab items-start gap-3 border-b border-hairline bg-raised active:cursor-grabbing"
-        style={{ padding: `${11 * scale}px ${14 * scale}px` }}
+        className="drag-handle flex cursor-grab items-start gap-3 border-b border-hairline active:cursor-grabbing"
+        style={{ padding: `${12 * scale}px ${15 * scale}px ${11 * scale}px` }}
       >
         <div className="min-w-0 flex-1">
           {eyebrow && (
-            <div
-              className="mb-1 truncate font-medium uppercase tracking-[0.14em] text-ink-faint"
-              style={px(10)}
-            >
+            <div className="eyebrow mb-[3px] truncate text-ink-faint" style={px(9.5)}>
               {eyebrow}
             </div>
           )}
-          <div className="truncate font-semibold tracking-tight text-ink" style={px(13)}>
+          <div
+            className="truncate font-semibold text-ink"
+            style={{ ...px(13), letterSpacing: "-0.011em" }}
+          >
             {title}
           </div>
           {/* Filing date and units are reference detail, not identity. Once the
               header is being magnified to stay legible there is no room for
               them, and keeping them would push the title out of the panel. */}
-          {meta && !far && <div className="mt-1 text-[11px] text-ink-muted">{meta}</div>}
+          {meta && !far && <div className="mt-[5px] text-[11px] text-ink-faint">{meta}</div>}
         </div>
         {!far && action}
       </header>

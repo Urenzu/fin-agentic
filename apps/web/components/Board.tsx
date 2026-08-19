@@ -189,7 +189,7 @@ function BoardInner() {
 
   const empty = nodes.length === 0;
 
-  const defaultEdgeOptions = useMemo(() => ({ style: { stroke: "#3a3a3a", strokeWidth: 1 } }), []);
+  const defaultEdgeOptions = useMemo(() => ({ style: { stroke: "#2b2b33", strokeWidth: 1 } }), []);
 
   return (
     <div ref={pane} className="relative h-full w-full">
@@ -204,16 +204,16 @@ function BoardInner() {
         maxZoom={2}
         proOptions={{ hideAttribution: false }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#2b3142" />
+        <Background variant={BackgroundVariant.Dots} gap={30} size={1} color="#1e1e24" />
         <Controls position="bottom-right" showInteractive={false} />
         {!empty && (
           <MiniMap
             position="bottom-left"
             pannable
             zoomable
-            maskColor="rgb(13 13 13 / 0.82)"
-            nodeColor="#3a3a3a"
-            className="!rounded-lg !border !border-hairline !bg-surface"
+            maskColor="rgb(8 8 10 / 0.85)"
+            nodeColor="#2b2b33"
+            className="!rounded-xl !border !border-hairline !bg-surface"
           />
         )}
       </ReactFlow>
@@ -222,15 +222,15 @@ function BoardInner() {
         <div className="pointer-events-auto flex flex-col items-center gap-3">
           <TickerSearch onPick={load} busy={busy} />
           {error && (
-            <div className="panel rounded-lg px-4 py-2 text-[12px] text-negative">{error}</div>
+            <div className="panel rounded-xl px-4 py-2 text-[12px] text-negative">{error}</div>
           )}
         </div>
       </div>
 
       {empty && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
-          <h1 className="text-[28px] font-semibold tracking-tight text-ink">fin-agentic</h1>
-          <p className="max-w-md text-[13px] leading-relaxed text-ink-muted">
+          <h1 className="text-[30px] font-semibold tracking-[-0.03em] text-ink">fin-agentic</h1>
+          <p className="max-w-sm text-[13px] leading-relaxed text-ink-faint">
             Search a ticker to pull its statements straight from EDGAR, rendered exactly as the
             filer laid them out.
           </p>

@@ -86,7 +86,7 @@ export function TickerSearch({
 
   return (
     <div className="relative w-[420px]">
-      <div className="panel flex items-center gap-3 rounded-lg px-4 py-2.5">
+      <div className="panel flex items-center gap-3 rounded-xl px-4 py-3">
         <svg
           viewBox="0 0 20 20"
           className="h-4 w-4 shrink-0 fill-none stroke-ink-faint stroke-[1.6]"
@@ -106,14 +106,14 @@ export function TickerSearch({
         {busy ? (
           <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-hairline-strong border-t-ink" />
         ) : (
-          <kbd className="shrink-0 rounded border border-hairline-strong px-1.5 py-0.5 text-[10px] text-ink-faint">
+          <kbd className="shrink-0 rounded border border-hairline px-1.5 py-0.5 font-mono text-[10px] text-ink-faint">
             /
           </kbd>
         )}
       </div>
 
       {(results.length > 0 || error) && (
-        <div className="panel absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-lg">
+        <div className="panel absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-xl">
           {error && <div className="px-4 py-3 text-[12px] text-negative">{error}</div>}
           {results.map((registrant, index) => (
             <button
@@ -121,10 +121,10 @@ export function TickerSearch({
               onMouseEnter={() => setActive(index)}
               onClick={() => choose(registrant)}
               className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
-                index === active ? "bg-raised" : "hover:bg-raised/60"
+                index === active ? "bg-white/[0.05]" : "hover:bg-white/[0.03]"
               }`}
             >
-              <span className="tabular w-14 shrink-0 text-[12px] font-semibold text-ink">
+              <span className="tabular w-16 shrink-0 text-[12px] font-medium text-ink">
                 {registrant.ticker}
               </span>
               <span className="truncate text-[12px] text-ink-muted">{registrant.name}</span>
