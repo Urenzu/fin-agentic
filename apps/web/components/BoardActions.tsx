@@ -1,0 +1,34 @@
+"use client";
+
+import { createContext, useContext } from "react";
+
+import type { FilingIndex, Registrant } from "@/lib/types";
+
+/**
+ * What a node may ask the board to do.
+ *
+ * Passed by context rather than through node data. React Flow treats `data` as
+ * a value it may copy and compare, and putting callbacks there means every
+ * board-level change produces new function identities on every node -- and a
+ * node's data stops being the plain, inspectable description of what it shows.
+ */
+export type BoardActions = {
+  /** Put a filing's statements on the board, or take them off again. */
+  toggleFiling: (registrant: Registrant, filing: FilingIndex) => void;
+  /** Accessions currently on the board, so the picker can show what is open. */
+  openAccessions: ReadonlySet<string>;
+  /** Accessions being fetched, so a slow filing does not look like a dead click. */
+  pendingAccessions: ReadonlySet<string>;
+};
+
+const BoardActionsContext = createContext<BoardActions | null>(null);
+
+export const BoardActionsProvider = BoardActionsContext.Provider;
+
+export function useBoardActions(): BoardActions {
+  const actions = useContext(BoardActionsContext);
+  if (actions === null) {
+    throw new Error("useBoardActions must be used inside the board");
+  }
+  return actions;
+}

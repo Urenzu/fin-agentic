@@ -10,6 +10,7 @@ import {
   type Node,
 } from "@xyflow/react";
 
+import { FilingPicker } from "../FilingPicker";
 import { NodeFrame } from "../NodeFrame";
 import { fitScale, tierFor } from "@/lib/lod";
 import { entityNodeHeight, MIN_ENTITY_HEIGHT, MIN_ENTITY_WIDTH } from "@/lib/nodeSize";
@@ -175,6 +176,8 @@ export function EntityNode({ id, data, height: live }: NodeProps<EntityNodeType>
                 looking output built on the wrong data, so they are shown rather
                 than logged. An unsupported shape already contributes its message
                 here, so rendering `shape.message` separately printed it twice. */}
+            <FilingPicker registrant={registrant} />
+
             {advisories.map((advisory) => (
               <p
                 key={advisory.key}

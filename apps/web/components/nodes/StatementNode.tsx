@@ -25,6 +25,7 @@ import {
 import type { AsFiledStatement } from "@/lib/types";
 
 export type StatementNodeData = {
+  cik: number;
   company: string;
   ticker: string;
   statement: AsFiledStatement;

@@ -62,7 +62,7 @@ export function overflowsDefault(statement: AsFiledStatement): boolean {
   return statementContentHeight(statement) > DEFAULT_STATEMENT_HEIGHT;
 }
 
-export const ENTITY_NODE_WIDTH = 340;
+export const ENTITY_NODE_WIDTH = 360;
 
 /** Enough for the header plus one row of the stat grid. */
 export const MIN_ENTITY_WIDTH = 200;
@@ -70,6 +70,9 @@ export const MIN_ENTITY_HEIGHT = 120;
 
 const CHARS_PER_LINE = 52;
 const LINE_HEIGHT = 16;
+
+/** The filing picker: form toggle, and a scrollable list under it. */
+const FILING_PICKER_HEIGHT = 300;
 
 /**
  * The entity card's height for the state it is in.
@@ -87,7 +90,7 @@ export function entityNodeHeight(entity: Entity): number {
     (total, advisory) => total + 26 + Math.ceil(advisory.length / CHARS_PER_LINE) * LINE_HEIGHT,
     0,
   );
-  return chrome + body + advisories;
+  return chrome + body + FILING_PICKER_HEIGHT + advisories;
 }
 
 /** Keep a resized dimension inside what the node can usefully be. */
