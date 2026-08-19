@@ -29,7 +29,7 @@ test("content wider than the pane is zoomed out to fit", () => {
   const view = frame([box(0, 0, 3800, 560)], 1920, 1000);
   assert.ok(view);
   assert.ok(view.zoom < 1, `expected zoom < 1, got ${view.zoom}`);
-  assert.ok((3800 * view.zoom) <= 1920 - 96 + 0.001);
+  assert.ok(3800 * view.zoom <= 1920 - 96 + 0.001);
 });
 
 test("small content is never magnified past 1", () => {

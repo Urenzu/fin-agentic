@@ -1,13 +1,15 @@
 "use client";
 
-import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
+import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
 
 import { NodeFrame } from "../NodeFrame";
-import { formatValue, scaleExponent } from "@/lib/decimal";
+import { abbreviate, formatValue, scaleExponent } from "@/lib/decimal";
+import { fitScale, headlineCapacity, headlineRows, IDENTITY_BELOW, SUMMARY_BELOW } from "@/lib/lod";
 import type { AsFiledStatement } from "@/lib/types";
 
 export type StatementNodeData = {
   company: string;
+  ticker: string;
   statement: AsFiledStatement;
 };
 
@@ -19,8 +21,8 @@ const INDENT_STEP = 13;
 
 const HEADER_HEIGHT = 66;
 const COLUMN_HEADER_HEIGHT = 34;
-const DATA_ROW_HEIGHT = 23;
-const SECTION_ROW_HEIGHT = 30;
+const DATA_ROW_HEIGHT = 24;
+const SECTION_ROW_HEIGHT = 31;
 export const MAX_NODE_HEIGHT = 560;
 
 export function statementNodeWidth(statement: AsFiledStatement): number {
@@ -74,7 +76,8 @@ function isShareCount(element: string | null): boolean {
 }
 
 export function StatementNode({ data }: NodeProps<StatementNodeType>) {
-  const { statement, company } = data;
+  const { statement, company, ticker } = data;
+  const zoom = useStore((state) => state.transform[2]);
   const monetaryExp = scaleExponent(statement.monetary_scale);
   const shareExp = scaleExponent(statement.share_scale);
 
@@ -84,12 +87,27 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
     day: "numeric",
   });
 
+  // Bounded by the panel: a comprehensive-income statement can be short
+  // enough that an unbounded header would not leave room for the figures.
+  const nodeHeight = statementNodeHeight(statement);
+  const scale = fitScale(zoom, nodeHeight, 0.4);
+  const summarised = zoom < SUMMARY_BELOW;
+  const identityOnly = zoom < IDENTITY_BELOW;
+  const newest = statement.columns[0];
+
   return (
     <>
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-white/20" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2 !w-2 !border-0 !bg-hairline-strong"
+      />
       <NodeFrame
-        eyebrow={company}
+        // Zoomed out the ticker is what identifies the row; the full registrant
+        // name is unreadable long before the panel stops being recognisable.
+        eyebrow={summarised ? ticker : company}
         title={statement.short_name}
+        scale={summarised ? scale : 1}
         meta={
           <span className="tabular">
             {statement.form} &middot; filed {filed} &middot; {unitsCaption(monetaryExp)}
@@ -101,105 +119,162 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
             target="_blank"
             rel="noreferrer"
             title="The SEC exhibit these numbers came from"
-            className="nodrag shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-accent/50 hover:text-ink"
+            className="nodrag shrink-0 rounded border border-hairline-strong px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-ink-faint hover:text-ink"
           >
             SEC ↗
           </a>
         }
       >
-        <div className="nowheel nodrag overflow-auto">
-          <table className="w-full border-collapse text-[12px]">
-            <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
-              <tr>
-                <th
-                  className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-ink-faint"
-                  style={{ width: LABEL_COLUMN }}
-                />
-                {statement.columns.map((column) => (
-                  <th
-                    key={column}
-                    className="whitespace-nowrap px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-ink-muted"
-                    style={{ width: VALUE_COLUMN }}
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {statement.rows.map((row, index) => {
-                const scaleExp = isPerShare(row.element)
-                  ? 0
-                  : isShareCount(row.element)
-                    ? shareExp
-                    : monetaryExp;
-
-                if (row.is_abstract) {
+        {summarised ? (
+          // Far view: the table is texture at this distance, so it is replaced
+          // by the handful of lines that carry the most meaning per pixel, set
+          // large enough to read without zooming back in.
+          <div
+            className="flex flex-1 flex-col justify-center overflow-hidden"
+            style={{ padding: `0 ${16 * scale}px`, gap: `${10 * scale}px` }}
+          >
+            {!identityOnly &&
+              newest !== undefined &&
+              headlineRows(statement, Math.min(3, headlineCapacity(nodeHeight, scale))).map(
+                (row, index) => {
+                  const raw = row.values[newest];
+                  if (raw === undefined) return null;
+                  const perShare = isPerShare(row.element);
                   return (
-                    <tr key={index}>
+                    <div key={index}>
+                      <div
+                        className="truncate uppercase tracking-[0.1em] text-ink-faint"
+                        style={{ fontSize: `${9 * scale}px` }}
+                      >
+                        {row.label}
+                      </div>
+                      <div
+                        className={`tabular font-semibold leading-tight ${
+                          raw.startsWith("-") ? "text-negative" : "text-ink"
+                        }`}
+                        style={{ fontSize: `${20 * scale}px` }}
+                      >
+                        {/* Abbreviated deliberately: at this distance the reader
+                          wants the magnitude, and "391.0B" survives being
+                          small in a way that "391,035" does not. Per-share
+                          amounts are already small numbers and abbreviating
+                          them would destroy the only figure that matters. */}
+                        {perShare ? formatValue(raw, 0, { dp: 2, parens: true }) : abbreviate(raw)}
+                      </div>
+                    </div>
+                  );
+                },
+              )}
+          </div>
+        ) : (
+          <div className="nowheel nodrag overflow-auto">
+            {/* `width` on a column is a hint, not a floor: a statement of
+                shareholders' equity carries headers like "ACCUMULATED OTHER
+                COMPREHENSIVE INCOME (LOSS)", and letting the table fit the
+                panel squeezed the label column until every line wrapped to
+                five or six rows. Sizing to content and scrolling instead keeps
+                labels on one line, which is what makes the statement scannable. */}
+            <table
+              className="border-collapse text-[12px]"
+              style={{ width: "max-content", minWidth: "100%" }}
+            >
+              <thead className="sticky top-0 z-10 bg-surface">
+                <tr>
+                  <th
+                    className="border-b border-hairline px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-ink-faint"
+                    style={{ width: LABEL_COLUMN, minWidth: LABEL_COLUMN }}
+                  />
+                  {statement.columns.map((column) => (
+                    <th
+                      key={column}
+                      className="whitespace-nowrap border-b border-hairline px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-ink-muted"
+                      style={{ width: VALUE_COLUMN, minWidth: VALUE_COLUMN }}
+                    >
+                      {column}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {statement.rows.map((row, index) => {
+                  const scaleExp = isPerShare(row.element)
+                    ? 0
+                    : isShareCount(row.element)
+                      ? shareExp
+                      : monetaryExp;
+
+                  if (row.is_abstract) {
+                    return (
+                      <tr key={index}>
+                        <td
+                          colSpan={statement.columns.length + 1}
+                          className="px-4 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint"
+                          style={{ paddingLeft: 16 + row.indent * INDENT_STEP }}
+                        >
+                          {row.label}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return (
+                    <tr
+                      key={index}
+                      className={
+                        row.is_total
+                          ? "border-t border-hairline-strong font-semibold text-ink"
+                          : "text-ink-muted hover:bg-white/[0.04]"
+                      }
+                    >
                       <td
-                        colSpan={statement.columns.length + 1}
-                        className="px-4 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint"
+                        className="py-[5px] pr-3 leading-snug"
                         style={{ paddingLeft: 16 + row.indent * INDENT_STEP }}
+                        title={row.tag ?? undefined}
                       >
                         {row.label}
                       </td>
+                      {statement.columns.map((column) => {
+                        const value = row.values[column];
+                        return (
+                          <td
+                            key={column}
+                            className="tabular whitespace-nowrap px-3 py-[5px] text-right"
+                          >
+                            {value === undefined ? (
+                              // Blank on the face of the statement means the
+                              // line did not apply to that period. Rendering a
+                              // zero would assert something the filer did not.
+                              <span className="text-ink-faint/60">—</span>
+                            ) : (
+                              // Monetary and share figures are left unrounded:
+                              // dividing by the scale the parser applied
+                              // recovers exactly the digits the filing printed.
+                              // Per-share amounts are pinned to two places so a
+                              // $7.40 EPS does not render as "7.4" beside a
+                              // "7.46".
+                              <span className={value.startsWith("-") ? "text-negative" : undefined}>
+                                {formatValue(value, scaleExp, {
+                                  parens: true,
+                                  dp: isPerShare(row.element) ? 2 : undefined,
+                                })}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
-                }
-
-                return (
-                  <tr
-                    key={index}
-                    className={
-                      row.is_total
-                        ? "border-t border-white/[0.14] font-semibold text-ink"
-                        : "text-ink-muted hover:bg-white/[0.03]"
-                    }
-                  >
-                    <td
-                      className="py-[5px] pr-3 leading-snug"
-                      style={{ paddingLeft: 16 + row.indent * INDENT_STEP }}
-                      title={row.tag ?? undefined}
-                    >
-                      {row.label}
-                    </td>
-                    {statement.columns.map((column) => {
-                      const value = row.values[column];
-                      return (
-                        <td
-                          key={column}
-                          className="tabular whitespace-nowrap px-3 py-[5px] text-right"
-                        >
-                          {value === undefined ? (
-                            // Blank on the face of the statement means the line
-                            // did not apply to that period. Rendering a zero
-                            // would assert something the filer did not.
-                            <span className="text-ink-faint/50">—</span>
-                          ) : (
-                            // Monetary and share figures are left unrounded:
-                            // dividing by the scale the parser applied recovers
-                            // exactly the digits the filing printed. Per-share
-                            // amounts are pinned to two places so a $7.40 EPS
-                            // does not render as "7.4" beside a "7.46".
-                            <span className={value.startsWith("-") ? "text-negative/90" : undefined}>
-                              {formatValue(value, scaleExp, {
-                                parens: true,
-                                dp: isPerShare(row.element) ? 2 : undefined,
-                              })}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </NodeFrame>
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-white/20" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2 !w-2 !border-0 !bg-hairline-strong"
+      />
     </>
   );
 }

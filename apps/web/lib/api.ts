@@ -1,10 +1,4 @@
-import type {
-  AsFiledStatement,
-  Entity,
-  FilingIndex,
-  Registrant,
-  Validation,
-} from "./types";
+import type { AsFiledStatement, Entity, FilingIndex, Registrant, Validation } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -22,7 +16,11 @@ type Params = Record<string, string | number | boolean | undefined>;
 
 async function request<T>(
   path: string,
-  { method = "GET", params, signal }: { method?: string; params?: Params; signal?: AbortSignal } = {},
+  {
+    method = "GET",
+    params,
+    signal,
+  }: { method?: string; params?: Params; signal?: AbortSignal } = {},
 ): Promise<T> {
   const url = new URL(path, BASE);
   for (const [key, value] of Object.entries(params ?? {})) {
@@ -74,8 +72,7 @@ export const api = {
   resolveCik: (cik: number, ticker: string) =>
     request<Entity>("/entities/resolve-cik", { method: "POST", params: { cik, ticker } }),
 
-  entity: (cik: number, signal?: AbortSignal) =>
-    request<Entity>(`/entities/${cik}`, { signal }),
+  entity: (cik: number, signal?: AbortSignal) => request<Entity>(`/entities/${cik}`, { signal }),
 
   filings: (cik: number, form = "10-K", limit = 8, signal?: AbortSignal) =>
     request<FilingIndex[]>(`/entities/${cik}/filings`, { params: { form, limit }, signal }),

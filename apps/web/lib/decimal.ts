@@ -131,11 +131,7 @@ export function formatDec(value: Dec, opts: NumberFormat = {}): string {
  * `scaleExp` restates the value in the units the filing printed, so a balance
  * sheet headed "$ in Millions" shows 147,957 rather than 147,957,000,000.
  */
-export function formatValue(
-  value: string,
-  scaleExp: number,
-  opts: NumberFormat = {},
-): string {
+export function formatValue(value: string, scaleExp: number, opts: NumberFormat = {}): string {
   const parsed = parseDec(value);
   if (parsed === null) return value;
   return formatDec(shift(parsed, scaleExp), opts);
@@ -155,8 +151,7 @@ export function abbreviate(value: string): string {
   if (isZero(parsed)) return "0";
 
   const magnitude = split(parsed).whole.replace(/^0+/, "").length;
-  const [places, suffix] =
-    MAGNITUDES.find(([p]) => magnitude > p) ?? ([0, ""] as const);
+  const [places, suffix] = MAGNITUDES.find(([p]) => magnitude > p) ?? ([0, ""] as const);
 
   const sign = isNegative(parsed) ? "-" : "";
   const scaled = formatDec(shift({ ...parsed, neg: false }, places), {

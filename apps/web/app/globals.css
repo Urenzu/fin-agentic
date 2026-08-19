@@ -2,20 +2,31 @@
 @import "@xyflow/react/dist/style.css";
 
 @theme {
-  /* Near-black rather than #000: pure black makes the glass panels read as
-     cut-outs instead of surfaces, because there is nothing behind them for the
-     blur to pick up. */
-  --color-void: #06070a;
-  --color-surface: #0b0d12;
+  /* A neutral grey ramp with no hue in it. The previous palette was tinted
+     blue and paired with a violet accent, which is the look every generated
+     dashboard has. Financial statements are dense black-on-white documents;
+     the chrome should stay out of the way and let the only colour on screen
+     mean something. */
+  --color-void: #0d0d0d;
+  --color-surface: #171717;
+  --color-raised: #212121;
+  --color-hairline: #2f2f2f;
+  --color-hairline-strong: #414141;
 
-  --color-hairline: #1b1f28;
-  --color-ink: #e8eaf0;
-  --color-ink-muted: #8b91a1;
-  --color-ink-faint: #5a6072;
+  --color-ink: #f2f2f2;
+  --color-ink-muted: #b4b4b4;
+  /* Lifted well above the old #5a6072. Labels at this level are read at a
+     glance across a whole statement, and the old value failed contrast once
+     the canvas was zoomed out at all. */
+  --color-ink-faint: #8f8f8f;
 
-  --color-accent: #7c8cff;
-  --color-positive: #4ade80;
-  --color-negative: #fb7185;
+  /* Colour is reserved for meaning, never decoration:
+     negative -> a figure the filer printed in parentheses
+     caution  -> an advisory that could make wrong output look right
+     There is deliberately no brand accent. Emphasis is done with weight and
+     white, the way a printed statement does it. */
+  --color-negative: #e2685c;
+  --color-caution: #d8a657;
 
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
@@ -38,23 +49,23 @@ body {
   font-feature-settings: "tnum";
 }
 
-@utility glass {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.015)),
-    rgb(11 13 18 / 0.72);
-  backdrop-filter: blur(20px) saturate(140%);
-  border: 1px solid rgb(255 255 255 / 0.08);
-  box-shadow:
-    0 1px 0 0 rgb(255 255 255 / 0.05) inset,
-    0 18px 50px -12px rgb(0 0 0 / 0.75);
+/* Flat, opaque, one hairline border. Replaces the old `glass` utility: a
+   backdrop blur over a dark canvas buys nothing visually, costs a compositor
+   pass per node, and was the single biggest tell of the generated look. Opaque
+   panels also keep statement text at full contrast instead of letting the dot
+   grid show through the numbers. */
+@utility panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.8);
 }
 
 /* ---- react-flow -------------------------------------------------------- */
 
 .react-flow {
   --xy-background-color: var(--color-void);
-  --xy-edge-stroke-default: #2a3040;
-  --xy-edge-stroke-selected-default: var(--color-accent);
+  --xy-edge-stroke-default: #3a3a3a;
+  --xy-edge-stroke-selected-default: #7a7a7a;
 }
 
 .react-flow__node {
@@ -70,8 +81,8 @@ body {
   text-align: left;
 }
 
-.react-flow__node.selected .glass-frame {
-  border-color: rgb(124 140 255 / 0.55);
+.react-flow__node.selected .panel-frame {
+  border-color: var(--color-hairline-strong);
 }
 
 .react-flow__attribution {
@@ -81,13 +92,17 @@ body {
 }
 
 .react-flow__controls-button {
-  background: rgb(20 23 31 / 0.9);
+  background: var(--color-raised);
   border-bottom: 1px solid var(--color-hairline);
   fill: var(--color-ink-muted);
 }
 
 .react-flow__controls-button:hover {
-  background: rgb(30 34 45 / 0.95);
+  background: #2c2c2c;
+}
+
+.react-flow__minimap {
+  background: var(--color-surface);
 }
 
 ::-webkit-scrollbar {
@@ -96,13 +111,13 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.09);
+  background: rgb(255 255 255 / 0.12);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.22);
   background-clip: content-box;
 }

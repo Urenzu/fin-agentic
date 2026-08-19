@@ -76,7 +76,11 @@ function layout(
       position: { x, y: origin.y },
       width: statementNodeWidth(statement),
       height: statementNodeHeight(statement),
-      data: { company: entity.registrant.name, statement },
+      data: {
+        company: entity.registrant.name,
+        ticker: entity.registrant.ticker || `CIK ${entity.registrant.cik}`,
+        statement,
+      },
       dragHandle: ".drag-handle",
     });
     x += statementNodeWidth(statement) + COLUMN_GAP;
@@ -185,10 +189,7 @@ function BoardInner() {
 
   const empty = nodes.length === 0;
 
-  const defaultEdgeOptions = useMemo(
-    () => ({ style: { stroke: "#232838", strokeWidth: 1 } }),
-    [],
-  );
+  const defaultEdgeOptions = useMemo(() => ({ style: { stroke: "#3a3a3a", strokeWidth: 1 } }), []);
 
   return (
     <div ref={pane} className="relative h-full w-full">
@@ -210,9 +211,9 @@ function BoardInner() {
             position="bottom-left"
             pannable
             zoomable
-            maskColor="rgb(6 7 10 / 0.82)"
-            nodeColor="#232838"
-            className="!rounded-lg !border !border-white/[0.07] !bg-surface"
+            maskColor="rgb(13 13 13 / 0.82)"
+            nodeColor="#3a3a3a"
+            className="!rounded-lg !border !border-hairline !bg-surface"
           />
         )}
       </ReactFlow>
@@ -221,7 +222,7 @@ function BoardInner() {
         <div className="pointer-events-auto flex flex-col items-center gap-3">
           <TickerSearch onPick={load} busy={busy} />
           {error && (
-            <div className="glass rounded-lg px-4 py-2 text-[12px] text-negative">{error}</div>
+            <div className="panel rounded-lg px-4 py-2 text-[12px] text-negative">{error}</div>
           )}
         </div>
       </div>

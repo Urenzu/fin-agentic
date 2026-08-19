@@ -86,8 +86,11 @@ export function TickerSearch({
 
   return (
     <div className="relative w-[420px]">
-      <div className="glass flex items-center gap-3 rounded-xl px-4 py-2.5">
-        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 fill-none stroke-ink-faint stroke-[1.6]">
+      <div className="panel flex items-center gap-3 rounded-lg px-4 py-2.5">
+        <svg
+          viewBox="0 0 20 20"
+          className="h-4 w-4 shrink-0 fill-none stroke-ink-faint stroke-[1.6]"
+        >
           <circle cx="9" cy="9" r="6" />
           <path d="m13.5 13.5 3.5 3.5" strokeLinecap="round" />
         </svg>
@@ -101,16 +104,16 @@ export function TickerSearch({
           className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
         />
         {busy ? (
-          <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-white/15 border-t-accent" />
+          <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-[1.5px] border-hairline-strong border-t-ink" />
         ) : (
-          <kbd className="shrink-0 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-ink-faint">
+          <kbd className="shrink-0 rounded border border-hairline-strong px-1.5 py-0.5 text-[10px] text-ink-faint">
             /
           </kbd>
         )}
       </div>
 
       {(results.length > 0 || error) && (
-        <div className="glass absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-xl">
+        <div className="panel absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-lg">
           {error && <div className="px-4 py-3 text-[12px] text-negative">{error}</div>}
           {results.map((registrant, index) => (
             <button
@@ -118,10 +121,10 @@ export function TickerSearch({
               onMouseEnter={() => setActive(index)}
               onClick={() => choose(registrant)}
               className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
-                index === active ? "bg-white/[0.07]" : "hover:bg-white/[0.04]"
+                index === active ? "bg-raised" : "hover:bg-raised/60"
               }`}
             >
-              <span className="tabular w-14 shrink-0 text-[12px] font-semibold text-accent">
+              <span className="tabular w-14 shrink-0 text-[12px] font-semibold text-ink">
                 {registrant.ticker}
               </span>
               <span className="truncate text-[12px] text-ink-muted">{registrant.name}</span>

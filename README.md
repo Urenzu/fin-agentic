@@ -101,4 +101,4 @@ docker compose up -d      # exposes 5433 to avoid clashing with a local 5432
 | PDF ingestion and extraction | later |
 | Chat agent | later |
 
-176 Python tests and 23 TypeScript tests passing.
+176 Python tests and 38 TypeScript tests passing.
