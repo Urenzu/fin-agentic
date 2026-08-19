@@ -117,11 +117,10 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
           first. The controls draw nothing -- see the resize rules in
           globals.css -- so the only affordance is the cursor changing shape. */}
       <NodeResizer minWidth={MIN_STATEMENT_WIDTH} minHeight={MIN_STATEMENT_HEIGHT} />
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!h-2 !w-2 !border-0 !bg-hairline-strong"
-      />
+      {/* Target only. Every edge on this board runs entity -> statement, so a
+          statement is never a source and the matching handle on the right was
+          unreachable -- it drew a dot on the edge of the panel and did nothing. */}
+      <Handle type="target" position={Position.Left} />
       <NodeFrame
         // Zoomed out the ticker is what identifies the row; the full registrant
         // name is unreadable long before the panel stops being recognisable.
@@ -307,11 +306,6 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
           </div>
         )}
       </NodeFrame>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-2 !w-2 !border-0 !bg-hairline-strong"
-      />
     </>
   );
 }

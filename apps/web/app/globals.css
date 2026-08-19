@@ -155,13 +155,23 @@ body {
   background: var(--color-surface);
 }
 
-/* Connection handles are decorative here -- edges are drawn by the board, not
-   by the reader -- and left interactive they claimed the middle of each side
-   edge with a crosshair, which is exactly where the resize strip needs to be. */
+/* Handles exist only as the anchor an edge is drawn to. Edges here come from
+   the board, not from the reader, so a handle has nothing to offer and is not
+   drawn: it left a grey dot floating on the side of every panel. It keeps its
+   box, because that box is what the edge endpoint is computed from.
+
+   Made inert as well -- interactive, they claimed the middle of each side edge
+   with a crosshair, which is exactly where the resize strip needs to be. */
 .react-flow__handle,
 .react-flow__handle.connectionindicator {
   pointer-events: none;
   cursor: default;
+  background: transparent;
+  border-color: transparent;
+  min-width: 1px;
+  min-height: 1px;
+  width: 1px;
+  height: 1px;
 }
 
 /* ---- resizing ----------------------------------------------------------

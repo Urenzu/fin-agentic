@@ -106,11 +106,7 @@ export function EntityNode({ id, data, height: live }: NodeProps<EntityNodeType>
             {registrant.ticker || `CIK ${registrant.cik}`}
           </span>
         </div>
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="!h-2 !w-2 !border-0 !bg-hairline-strong"
-        />
+        <Handle type="source" position={Position.Right} />
       </>
     );
   }
@@ -195,11 +191,7 @@ export function EntityNode({ id, data, height: live }: NodeProps<EntityNodeType>
           </div>
         )}
       </NodeFrame>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-2 !w-2 !border-0 !bg-hairline-strong"
-      />
+      <Handle type="source" position={Position.Right} />
     </>
   );
 }
