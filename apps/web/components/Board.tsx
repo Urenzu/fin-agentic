@@ -16,19 +16,15 @@ import {
 } from "@xyflow/react";
 
 import { TickerSearch } from "./TickerSearch";
+import { EntityNode, type EntityNodeType } from "./nodes/EntityNode";
+import { StatementNode, type StatementNodeType } from "./nodes/StatementNode";
 import {
+  DEFAULT_STATEMENT_HEIGHT,
   ENTITY_NODE_WIDTH,
-  EntityNode,
   entityNodeHeight,
-  type EntityNodeType,
-} from "./nodes/EntityNode";
-import {
-  MAX_NODE_HEIGHT,
-  StatementNode,
   statementNodeHeight,
   statementNodeWidth,
-  type StatementNodeType,
-} from "./nodes/StatementNode";
+} from "@/lib/nodeSize";
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, Registrant } from "@/lib/types";
 import { frame } from "@/lib/viewport";
@@ -170,7 +166,7 @@ function BoardInner() {
             })),
         ]);
 
-        nextRow.current += MAX_NODE_HEIGHT + ROW_GAP;
+        nextRow.current += DEFAULT_STATEMENT_HEIGHT + ROW_GAP;
         // Framing is deferred to an effect so it reads the committed node list
         // rather than a copy assembled inside a state updater, which StrictMode
         // is free to invoke more than once.

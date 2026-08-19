@@ -1,10 +1,27 @@
 "use client";
 
-import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Handle,
+  NodeResizer,
+  Position,
+  useReactFlow,
+  useStore,
+  type NodeProps,
+  type Node,
+} from "@xyflow/react";
 
 import { NodeFrame } from "../NodeFrame";
 import { abbreviate, formatValue, scaleExponent } from "@/lib/decimal";
 import { fitScale, headlineCapacity, headlineRows, tierFor } from "@/lib/lod";
+import {
+  INDENT_STEP,
+  LABEL_COLUMN,
+  MIN_STATEMENT_HEIGHT,
+  MIN_STATEMENT_WIDTH,
+  statementNodeHeight,
+  VALUE_COLUMN,
+} from "@/lib/nodeSize";
 import type { AsFiledStatement } from "@/lib/types";
 
 export type StatementNodeData = {
@@ -14,38 +31,6 @@ export type StatementNodeData = {
 };
 
 export type StatementNodeType = Node<StatementNodeData, "statement">;
-
-const LABEL_COLUMN = 300;
-const VALUE_COLUMN = 108;
-const INDENT_STEP = 13;
-
-const HEADER_HEIGHT = 66;
-const COLUMN_HEADER_HEIGHT = 34;
-const DATA_ROW_HEIGHT = 24;
-const SECTION_ROW_HEIGHT = 31;
-export const MAX_NODE_HEIGHT = 560;
-
-export function statementNodeWidth(statement: AsFiledStatement): number {
-  return LABEL_COLUMN + Math.max(statement.columns.length, 1) * VALUE_COLUMN + 32;
-}
-
-/**
- * The rendered height of a statement, estimated from its row counts.
- *
- * Declaring a size matters beyond layout: React Flow keeps a node
- * `visibility: hidden` until its ResizeObserver has measured it, and under
- * StrictMode's double mount that observer can be torn down before it ever
- * fires -- leaving nodes invisible and `fitView` a no-op, because the library
- * believes it has nothing with a known size to fit. Supplying dimensions up
- * front removes the dependency on measurement entirely.
- */
-export function statementNodeHeight(statement: AsFiledStatement): number {
-  const body = statement.rows.reduce(
-    (total, row) => total + (row.is_abstract ? SECTION_ROW_HEIGHT : DATA_ROW_HEIGHT),
-    0,
-  );
-  return Math.min(HEADER_HEIGHT + COLUMN_HEADER_HEIGHT + body + 12, MAX_NODE_HEIGHT);
-}
 
 /** "$ in Millions", derived from the multiplier the parser already applied. */
 function unitsCaption(monetaryExp: number): string {
@@ -75,12 +60,39 @@ function isShareCount(element: string | null): boolean {
   return element !== null && /[Ss]hares/.test(element) && !isPerShare(element);
 }
 
-export function StatementNode({ data }: NodeProps<StatementNodeType>) {
+export function StatementNode({ id, data, selected, width, height }: NodeProps<StatementNodeType>) {
   const { statement, company, ticker } = data;
+  const { setNodes } = useReactFlow();
+  const scroller = useRef<HTMLDivElement>(null);
+
+  // The node's live height, which a resize changes. The level-of-detail
+  // arithmetic has to read this rather than the default, or a statement
+  // dragged taller would still budget its summary for the old size.
+  const nodeHeight = height ?? statementNodeHeight(statement);
+  const defaultHeight = statementNodeHeight(statement);
+
+  /**
+   * How much of the statement is out of view, measured rather than estimated.
+   *
+   * Node sizes are declared everywhere else precisely so nothing depends on
+   * the DOM having been measured yet. This is the one place that cannot work
+   * that way: the row estimate assumes one line per label, and a balance sheet
+   * whose labels wrap to two runs hundreds of pixels taller than the arithmetic
+   * predicts. Expanding to the estimate left the reader still scrolling, which
+   * is the entire thing the control exists to stop. Reading it back from the
+   * element is exact, and by the time anyone can click, the element is there.
+   */
+  const [hidden, setHidden] = useState(0);
+  useEffect(() => {
+    const element = scroller.current;
+    setHidden(element ? element.scrollHeight - element.clientHeight : 0);
+  }, [nodeHeight, width, statement]);
+
+  const fitted = hidden <= 1;
+
   // Both selectors collapse a continuous zoom to a value that changes a
   // handful of times, so this node re-renders on a step boundary rather than
   // on every frame of a zoom gesture.
-  const nodeHeight = statementNodeHeight(statement);
   const tier = useStore((state) => tierFor(state.transform[2]));
   const scale = useStore((state) => fitScale(state.transform[2], nodeHeight, 0.4));
   const monetaryExp = scaleExponent(statement.monetary_scale);
@@ -96,8 +108,33 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
   const identityOnly = tier === "identity";
   const newest = statement.columns[0];
 
+  /**
+   * Grow the panel until nothing is hidden, or put it back to the default.
+   *
+   * Re-measures on the click rather than trusting the value in state, so the
+   * result is right even if the reader has just dragged the node narrower and
+   * pushed more labels onto a second line.
+   */
+  const toggleFit = () => {
+    const element = scroller.current;
+    const out = element ? element.scrollHeight - element.clientHeight : 0;
+    const next = out > 1 ? nodeHeight + out : defaultHeight;
+    setNodes((nodes) => nodes.map((node) => (node.id === id ? { ...node, height: next } : node)));
+  };
+
   return (
     <>
+      {/* Only while the node is selected -- handles on every panel at once
+          would read as twelve nodes all mid-drag. Not offered in the far
+          tiers: there is nothing to scroll to when the table is not drawn,
+          and the handles would be the largest thing on the panel. */}
+      <NodeResizer
+        isVisible={selected === true && tier === "detail"}
+        minWidth={MIN_STATEMENT_WIDTH}
+        minHeight={MIN_STATEMENT_HEIGHT}
+        lineClassName="!border-transparent"
+        handleClassName="!h-2 !w-2 !rounded-sm !border !border-hairline-strong !bg-raised"
+      />
       <Handle
         type="target"
         position={Position.Left}
@@ -115,15 +152,42 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
           </span>
         }
         action={
-          <a
-            href={statement.source_url}
-            target="_blank"
-            rel="noreferrer"
-            title="The SEC exhibit these numbers came from"
-            className="nodrag shrink-0 rounded border border-hairline-strong px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-ink-faint hover:text-ink"
-          >
-            SEC ↗
-          </a>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {(hidden > 1 || nodeHeight > defaultHeight) && (
+              <button
+                type="button"
+                onClick={toggleFit}
+                title={
+                  fitted
+                    ? "Collapse to the default height"
+                    : "Grow the panel until every row is visible"
+                }
+                aria-label={fitted ? "Collapse statement" : "Expand statement to fit"}
+                className="nodrag rounded border border-hairline-strong px-1.5 py-1 text-ink-muted transition hover:border-ink-faint hover:text-ink"
+              >
+                <svg viewBox="0 0 12 12" className="h-3 w-3 fill-none stroke-current stroke-[1.4]">
+                  {fitted ? (
+                    <>
+                      <path d="M4.5 1.5v3h-3M7.5 10.5v-3h3" strokeLinecap="round" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M1.5 4.5v-3h3M10.5 7.5v3h-3" strokeLinecap="round" />
+                    </>
+                  )}
+                </svg>
+              </button>
+            )}
+            <a
+              href={statement.source_url}
+              target="_blank"
+              rel="noreferrer"
+              title="The SEC exhibit these numbers came from"
+              className="nodrag shrink-0 rounded border border-hairline-strong px-2 py-1 text-[10px] font-medium text-ink-muted transition hover:border-ink-faint hover:text-ink"
+            >
+              SEC ↗
+            </a>
+          </div>
         }
       >
         {summarised ? (
@@ -169,7 +233,11 @@ export function StatementNode({ data }: NodeProps<StatementNodeType>) {
               )}
           </div>
         ) : (
-          <div key={tier} className="tier-fade nowheel nodrag overflow-auto">
+          <div
+            key={tier}
+            ref={scroller}
+            className="tier-fade nowheel nodrag min-h-0 flex-1 overflow-auto"
+          >
             {/* `width` on a column is a hint, not a floor: a statement of
                 shareholders' equity carries headers like "ACCUMULATED OTHER
                 COMPREHENSIVE INCOME (LOSS)", and letting the table fit the

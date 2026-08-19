@@ -4,6 +4,7 @@ import { Handle, Position, useStore, type NodeProps, type Node } from "@xyflow/r
 
 import { NodeFrame } from "../NodeFrame";
 import { fitScale, tierFor } from "@/lib/lod";
+import { entityNodeHeight } from "@/lib/nodeSize";
 import type { Entity } from "@/lib/types";
 
 export type EntityNodeData = {
@@ -11,31 +12,6 @@ export type EntityNodeData = {
 };
 
 export type EntityNodeType = Node<EntityNodeData, "entity">;
-
-export const ENTITY_NODE_WIDTH = 340;
-
-const CHARS_PER_LINE = 52;
-const LINE_HEIGHT = 16;
-
-/**
- * The card's height for the state it is in.
- *
- * Recomputed whenever the entity changes, because the card grows as ingestion
- * finishes: a "building the ledger" sentence becomes a stat grid, and an
- * unsupported filer adds an advisory. See statementNodeHeight for why the size
- * is declared rather than measured.
- */
-export function entityNodeHeight(entity: Entity): number {
-  const chrome = 66 + 24;
-  const body = entity.coverage
-    ? 92 + (entity.coverage.earliest && entity.coverage.latest ? 46 : 0)
-    : 64;
-  const advisories = entity.advisories.reduce(
-    (total, advisory) => total + 26 + Math.ceil(advisory.length / CHARS_PER_LINE) * LINE_HEIGHT,
-    0,
-  );
-  return chrome + body + advisories;
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
