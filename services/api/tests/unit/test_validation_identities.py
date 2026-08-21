@@ -455,3 +455,107 @@ def test_an_uncorroborated_fact_stays_unverified(fy2024_instant):
     assert fact is not None
     assert not fact.is_usable
     assert len(verified.usable()) == 0
+
+
+# ---------------------------------------------------------------------------
+# mezzanine (temporary) equity
+# ---------------------------------------------------------------------------
+
+
+def test_a_filer_with_no_mezzanine_is_unaffected(clean_filing):
+    """Most companies have no redeemable instruments, and zero is the answer."""
+    report = run_checks(clean_filing)
+    assert _statuses(report, "bs.balances") == {CheckStatus.PASSED}
+    assert _statuses(report, "bs.le_total") == {CheckStatus.PASSED}
+
+
+def test_the_balance_sheet_balances_once_the_mezzanine_is_counted(
+    clean_filing, fy2024_instant
+):
+    """Assets = Liabilities + Temporary equity + Equity.
+
+    Redeemable instruments are neither a liability nor equity and sit on their
+    own line between the two. Leaving the term out failed by exactly their
+    carrying amount -- 92 of Tesla's 113 breaks were this and nothing else.
+    """
+    # Assets grow by the mezzanine, which is where a real filer's would be.
+    with_mezzanine = _replace_value(
+        clean_filing, Concept.TOTAL_ASSETS, fy2024_instant, "14500"
+    )
+    with_mezzanine = FactSet(
+        [
+            *with_mezzanine,
+            make_fact(Concept.TEMPORARY_EQUITY, fy2024_instant, Decimal("500")),
+        ]
+    )
+
+    report = run_checks(with_mezzanine)
+    assert _statuses(report, "bs.balances") == {CheckStatus.PASSED}
+
+
+def test_the_mezzanine_is_summed_when_only_its_parts_are_tagged(
+    clean_filing, fy2024_instant
+):
+    """Tesla tags redeemable NCI and the parent portion, never the total."""
+    facts = _replace_value(clean_filing, Concept.TOTAL_ASSETS, fy2024_instant, "14500")
+    facts = FactSet(
+        [
+            *facts,
+            make_fact(
+                Concept.REDEEMABLE_NONCONTROLLING_INTEREST,
+                fy2024_instant,
+                Decimal("400"),
+            ),
+            make_fact(Concept.TEMPORARY_EQUITY_PARENT, fy2024_instant, Decimal("100")),
+        ]
+    )
+
+    report = run_checks(facts)
+    assert _statuses(report, "bs.balances") == {CheckStatus.PASSED}
+
+
+def test_a_tagged_total_wins_over_its_parts(clean_filing, fy2024_instant):
+    """Filers report both. Adding a part to a total that contains it would
+    double-count and turn a balanced sheet into a fabricated break."""
+    facts = _replace_value(clean_filing, Concept.TOTAL_ASSETS, fy2024_instant, "14500")
+    facts = FactSet(
+        [
+            *facts,
+            make_fact(Concept.TEMPORARY_EQUITY, fy2024_instant, Decimal("500")),
+            make_fact(
+                Concept.REDEEMABLE_NONCONTROLLING_INTEREST,
+                fy2024_instant,
+                Decimal("400"),
+            ),
+            make_fact(Concept.TEMPORARY_EQUITY_PARENT, fy2024_instant, Decimal("100")),
+        ]
+    )
+
+    report = run_checks(facts)
+    assert _statuses(report, "bs.balances") == {CheckStatus.PASSED}
+
+
+def test_a_genuinely_unbalanced_sheet_still_fails(clean_filing, fy2024_instant):
+    """The term must not become an excuse that absorbs real breaks."""
+    facts = _replace_value(clean_filing, Concept.TOTAL_ASSETS, fy2024_instant, "14500")
+    facts = FactSet(
+        [*facts, make_fact(Concept.TEMPORARY_EQUITY, fy2024_instant, Decimal("50"))]
+    )
+
+    report = run_checks(facts)
+    assert CheckStatus.FAILED in _statuses(report, "bs.balances")
+
+
+def test_the_printed_total_also_counts_the_mezzanine(clean_filing, fy2024_instant):
+    """`Total liabilities and equity` includes the mezzanine on the face of the
+    statement, so the check that ties it to its parts must include it too."""
+    facts = _replace_value(
+        clean_filing, Concept.TOTAL_LIABILITIES_AND_EQUITY, fy2024_instant, "14500"
+    )
+    facts = _replace_value(facts, Concept.TOTAL_ASSETS, fy2024_instant, "14500")
+    facts = FactSet(
+        [*facts, make_fact(Concept.TEMPORARY_EQUITY, fy2024_instant, Decimal("500"))]
+    )
+
+    report = run_checks(facts)
+    assert _statuses(report, "bs.le_total") == {CheckStatus.PASSED}

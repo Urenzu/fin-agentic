@@ -135,6 +135,21 @@ class Concept(StrEnum):
     TOTAL_STOCKHOLDERS_EQUITY = "StockholdersEquity"
     MINORITY_INTEREST = "MinorityInterest"
     TOTAL_EQUITY_INCL_MINORITY = "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"
+    #: The mezzanine: what sits between liabilities and permanent equity.
+    #:
+    #: Instruments the issuer may be required to redeem for cash are neither a
+    #: liability nor equity, and US GAAP puts them on their own between the
+    #: two -- redeemable non-controlling interests, redeemable preferred, and
+    #: before ASU 2020-06 the equity component of convertible notes. Leaving
+    #: them out does not make the balance sheet approximately right; it makes
+    #: `Assets = Liabilities + Equity` fail by exactly their carrying amount,
+    #: which for Tesla is every period from 2014 onward.
+    TEMPORARY_EQUITY = "TemporaryEquityCarryingAmountIncludingPortionAttributableToNoncontrollingInterests"
+    #: The two halves of the mezzanine, for filers that tag the parts and not
+    #: the total. Tesla tags both of these and never the total, so without them
+    #: the fallback has nothing to add up.
+    REDEEMABLE_NONCONTROLLING_INTEREST = "RedeemableNoncontrollingInterestEquityCarryingAmount"
+    TEMPORARY_EQUITY_PARENT = "TemporaryEquityCarryingAmountAttributableToParent"
     TOTAL_LIABILITIES_AND_EQUITY = "LiabilitiesAndStockholdersEquity"
 
     # ---- Cash flow --------------------------------------------------------
@@ -256,6 +271,9 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
     Concept.TOTAL_STOCKHOLDERS_EQUITY: ConceptMeta(_BS, _I, _R, Unit.USD, "Total stockholders' equity", is_subtotal=True),
     Concept.MINORITY_INTEREST: ConceptMeta(_BS, _I, _R, Unit.USD, "Non-controlling interests"),
     Concept.TOTAL_EQUITY_INCL_MINORITY: ConceptMeta(_BS, _I, _R, Unit.USD, "Total equity including non-controlling interests", is_subtotal=True),
+    Concept.TEMPORARY_EQUITY: ConceptMeta(_BS, _I, _R, Unit.USD, "Temporary (mezzanine) equity", is_subtotal=True),
+    Concept.REDEEMABLE_NONCONTROLLING_INTEREST: ConceptMeta(_BS, _I, _R, Unit.USD, "Redeemable non-controlling interests"),
+    Concept.TEMPORARY_EQUITY_PARENT: ConceptMeta(_BS, _I, _R, Unit.USD, "Temporary equity attributable to parent"),
     Concept.TOTAL_LIABILITIES_AND_EQUITY: ConceptMeta(_BS, _I, _M, Unit.USD, "Total liabilities and equity", is_subtotal=True),
 
     # ---- Cash flow --------------------------------------------------------

@@ -304,12 +304,46 @@ def _cash_on(facts: FactSet, when: date) -> FinancialFact | None:
 # ---------------------------------------------------------------------------
 
 
+def _temporary_equity(facts: FactSet, period: Period) -> tuple[Decimal, list[FinancialFact]]:
+    """The mezzanine, and the facts it was built from.
+
+    Instruments the issuer may be required to redeem for cash sit on their own
+    line between liabilities and equity, so the accounting equation is really
+    `Assets = Liabilities + Temporary equity + Equity`. Omitting the middle
+    term does not make the check approximately right -- it makes it fail by
+    exactly the mezzanine's carrying amount, which is how 92 of Tesla's 113
+    validation failures arose.
+
+    Most filers tag the total. Tesla tags only the two components, so the total
+    is recovered by summing them -- the same fallback the liabilities term uses
+    when a filer runs current and non-current straight into equity without a
+    printed total. The total is preferred when present, because adding a
+    component to a total that already contains it would double count.
+
+    Nothing here is a failure: a company with no redeemable instruments tags
+    none of these, and zero is the right answer.
+    """
+    total = facts.get(Concept.TEMPORARY_EQUITY, period)
+    if total is not None:
+        return total.value, [total]
+
+    parts = [
+        fact
+        for concept in (
+            Concept.REDEEMABLE_NONCONTROLLING_INTEREST,
+            Concept.TEMPORARY_EQUITY_PARENT,
+        )
+        if (fact := facts.get(concept, period)) is not None
+    ]
+    return sum((fact.value for fact in parts), Decimal(0)), parts
+
+
 def check_balance_sheet_balances(facts: FactSet, period: Period) -> CheckResult | None:
-    """Assets = Liabilities + Equity. The one identity that is never optional."""
+    """Assets = Liabilities + Temporary equity + Equity."""
     if period.kind is not PeriodKind.INSTANT:
         return None
 
-    identity = "Assets = Liabilities + Equity"
+    identity = "Assets = Liabilities + Temporary equity + Equity"
     assets = facts.get(Concept.TOTAL_ASSETS, period)
     if assets is None:
         return _skipped("bs.balances", identity, Severity.CRITICAL, period, [Concept.TOTAL_ASSETS])
@@ -357,14 +391,16 @@ def check_balance_sheet_balances(facts: FactSet, period: Period) -> CheckResult 
         equity = parent.value + (minority.value if minority else Decimal(0))
         absent = () if minority else (Concept.MINORITY_INTEREST,)
 
-    involved = [assets, *liability_facts, *equity_facts]
+    mezzanine, mezzanine_facts = _temporary_equity(facts, period)
+
+    involved = [assets, *liability_facts, *mezzanine_facts, *equity_facts]
     return _compare(
         check_id="bs.balances",
         identity=identity,
         severity=Severity.CRITICAL,
         period=period,
         expected=assets.value,
-        actual=liability_total + equity,
+        actual=liability_total + mezzanine + equity,
         facts=involved,
         tolerance=_tolerance_for(involved, terms=3),
         absent_optional=absent,
@@ -511,7 +547,7 @@ def check_liabilities_and_equity_total(facts: FactSet, period: Period) -> CheckR
     if period.kind is not PeriodKind.INSTANT:
         return None
 
-    identity = "Total liabilities and equity = liabilities + equity"
+    identity = "Total liabilities and equity = liabilities + temporary equity + equity"
     total = facts.get(Concept.TOTAL_LIABILITIES_AND_EQUITY, period)
     liabilities = facts.get(Concept.TOTAL_LIABILITIES, period)
     if total is None or liabilities is None:
@@ -533,14 +569,16 @@ def check_liabilities_and_equity_total(facts: FactSet, period: Period) -> CheckR
             "bs.le_total", identity, Severity.CRITICAL, period, [Concept.TOTAL_STOCKHOLDERS_EQUITY]
         )
 
-    involved = [total, liabilities, equity_fact]
+    mezzanine, mezzanine_facts = _temporary_equity(facts, period)
+
+    involved = [total, liabilities, *mezzanine_facts, equity_fact]
     return _compare(
         check_id="bs.le_total",
         identity=identity,
         severity=Severity.CRITICAL,
         period=period,
         expected=total.value,
-        actual=liabilities.value + equity_fact.value,
+        actual=liabilities.value + mezzanine + equity_fact.value,
         facts=involved,
         tolerance=_tolerance_for(involved, terms=3),
     )

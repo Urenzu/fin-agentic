@@ -340,7 +340,7 @@ def test_check_results_expose_the_arithmetic(client):
     balances = next(r for r in body["results"] if r["check_id"] == "bs.balances")
 
     assert balances["expected"] == "14000"
-    assert balances["identity"] == "Assets = Liabilities + Equity"
+    assert balances["identity"] == "Assets = Liabilities + Temporary equity + Equity"
 
 
 def test_facts_are_listable_and_filterable(client):

@@ -128,6 +128,15 @@ TAG_TO_CONCEPT: dict[str, Concept] = {
     "StockholdersEquity": Concept.TOTAL_STOCKHOLDERS_EQUITY,
     "MinorityInterest": Concept.MINORITY_INTEREST,
     "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": Concept.TOTAL_EQUITY_INCL_MINORITY,
+    # ---- mezzanine (temporary) equity -------------------------------------
+    # Between liabilities and permanent equity: instruments the issuer may be
+    # required to redeem for cash. Kept as three concepts rather than one
+    # because filers tag either the total or the parts, and Tesla tags only
+    # the parts -- collapsing them here would either lose a component or add a
+    # component to a total that already contains it.
+    "TemporaryEquityCarryingAmountIncludingPortionAttributableToNoncontrollingInterests": Concept.TEMPORARY_EQUITY,
+    "RedeemableNoncontrollingInterestEquityCarryingAmount": Concept.REDEEMABLE_NONCONTROLLING_INTEREST,
+    "TemporaryEquityCarryingAmountAttributableToParent": Concept.TEMPORARY_EQUITY_PARENT,
     "LiabilitiesAndStockholdersEquity": Concept.TOTAL_LIABILITIES_AND_EQUITY,
     # ---- operating cash flow ---------------------------------------------
     "DepreciationDepletionAndAmortization": Concept.DEPRECIATION_AND_AMORTIZATION,
