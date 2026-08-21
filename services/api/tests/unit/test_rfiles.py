@@ -94,6 +94,29 @@ Diluted (in shares)</a></td>
 </table>
 """
 
+QUARTERLY_OPERATIONS = """
+<table class="report">
+<tr>
+<th class="tl" colspan="1" rowspan="2"><div style="width: 200px;"><strong>CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS (Unaudited) - USD ($)<br> shares in Thousands, $ in Millions</strong></div></th>
+<th class="th" colspan="2">3 Months Ended</th>
+<th class="th" colspan="2">9 Months Ended</th>
+</tr>
+<tr>
+<th class="th"><div>Jun. 27, 2026</div></th>
+<th class="th"><div>Jun. 28, 2025</div></th>
+<th class="th"><div>Jun. 27, 2026</div></th>
+<th class="th"><div>Jun. 28, 2025</div></th>
+</tr>
+<tr class="ro">
+<td class="pl"><a onclick="Show.showAR( this, 'defref_us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax', window );">Net sales</a></td>
+<td class="nump">$ 109,417<span></span></td>
+<td class="nump">$ 94,036<span></span></td>
+<td class="nump">$ 364,357<span></span></td>
+<td class="nump">$ 313,695<span></span></td>
+</tr>
+</table>
+"""
+
 
 # ---------------------------------------------------------------------------
 # structure
@@ -103,12 +126,18 @@ Diluted (in shares)</a></td>
 def test_the_title_and_columns_are_read():
     st = parse_statement(BALANCE_SHEET)
     assert "CONSOLIDATED BALANCE SHEETS" in st.title
-    assert st.columns == ("Sep. 27, 2025", "Sep. 28, 2024")
+    assert [c.label for c in st.columns] == ["Sep. 27, 2025", "Sep. 28, 2024"]
 
 
 def test_column_headings_are_parsed_as_dates():
     st = parse_statement(BALANCE_SHEET)
-    assert st.column_dates == (date(2025, 9, 27), date(2024, 9, 28))
+    assert [c.date for c in st.columns] == [date(2025, 9, 27), date(2024, 9, 28)]
+
+
+def test_a_balance_sheet_column_carries_no_duration():
+    """Its columns are instants, not periods."""
+    st = parse_statement(BALANCE_SHEET)
+    assert [c.duration for c in st.columns] == [None, None]
 
 
 def test_a_spanning_header_is_not_treated_as_a_column():
@@ -118,15 +147,22 @@ def test_a_spanning_header_is_not_treated_as_a_column():
     statement to the wrong periods.
     """
     st = parse_statement(CASH_FLOW)
-    assert st.columns == ("Sep. 27, 2025", "Sep. 28, 2024", "Sep. 30, 2023")
+    assert [c.label for c in st.columns] == ["Sep. 27, 2025", "Sep. 28, 2024", "Sep. 30, 2023"]
+
+
+def test_a_spanning_header_labels_the_columns_beneath_it():
+    st = parse_statement(CASH_FLOW)
+    assert [c.duration for c in st.columns] == ["12 Months Ended"] * 3
 
 
 def test_values_align_to_the_right_periods():
+    # Values are keyed by the column's ordinal position, so "0" is the newest
+    # period the statement prints.
     st = parse_statement(CASH_FLOW)
     row = st.row_for("NetIncomeLoss")
     assert row is not None
-    assert row.values["Sep. 27, 2025"] == Decimal("112010") * 10**6
-    assert row.values["Sep. 28, 2024"] == Decimal("93736") * 10**6
+    assert row.values["0"] == Decimal("112010") * 10**6
+    assert row.values["1"] == Decimal("93736") * 10**6
 
 
 def test_section_headings_are_marked_abstract():
@@ -165,7 +201,7 @@ def test_lines_outside_any_canonical_vocabulary_still_appear():
     st = parse_statement(BALANCE_SHEET)
     row = st.row_for("NontradeReceivablesCurrent")
     assert row is not None
-    assert row.values["Sep. 27, 2025"] == Decimal("33180") * 10**6
+    assert row.values["0"] == Decimal("33180") * 10**6
 
 
 # ---------------------------------------------------------------------------
@@ -178,21 +214,21 @@ def test_the_monetary_scale_is_applied():
     assert st.monetary_scale == Decimal(1_000_000)
     cash = st.row_for("CashAndCashEquivalentsAtCarryingValue")
     assert cash is not None
-    assert cash.values["Sep. 27, 2025"] == Decimal("35934") * 10**6
+    assert cash.values["0"] == Decimal("35934") * 10**6
 
 
 def test_currency_symbols_and_separators_are_stripped():
     st = parse_statement(BALANCE_SHEET)
     cash = st.row_for("CashAndCashEquivalentsAtCarryingValue")
     assert cash is not None
-    assert cash.values["Sep. 28, 2024"] == Decimal("29943") * 10**6
+    assert cash.values["1"] == Decimal("29943") * 10**6
 
 
 def test_parenthesised_values_are_negative():
     st = parse_statement(BALANCE_SHEET)
     deficit = st.row_for("RetainedEarningsAccumulatedDeficit")
     assert deficit is not None
-    assert deficit.values["Sep. 27, 2025"] == Decimal("-14264") * 10**6
+    assert deficit.values["0"] == Decimal("-14264") * 10**6
 
 
 def test_blank_cells_are_absent_rather_than_zero():
@@ -210,14 +246,14 @@ def test_per_share_amounts_do_not_take_the_monetary_scale():
     st = parse_statement(PER_SHARE)
     eps = st.row_for("EarningsPerShareDiluted")
     assert eps is not None
-    assert eps.values["Sep. 27, 2025"] == Decimal("7.46")
+    assert eps.values["0"] == Decimal("7.46")
 
 
 def test_share_counts_take_the_share_scale_not_the_monetary_one():
     st = parse_statement(PER_SHARE)
     shares = st.row_for("WeightedAverageNumberOfDilutedSharesOutstanding")
     assert shares is not None
-    assert shares.values["Sep. 27, 2025"] == Decimal("15004730") * 1000
+    assert shares.values["0"] == Decimal("15004730") * 1000
 
 
 def test_element_names_are_retained_for_cross_reference():
@@ -304,3 +340,44 @@ def test_display_name_preserves_characters_filing_summary_mangles():
         "CONSOLIDATED BALANCE SHEETS", "STATEMENTS OF SHAREHOLDERS&#8217; EQUITY"
     )
     assert parse_statement(html).display_name == "STATEMENTS OF SHAREHOLDERS\u2019 EQUITY"
+
+
+# ---------------------------------------------------------------------------
+# quarterly statements
+# ---------------------------------------------------------------------------
+
+
+def test_a_quarter_and_its_year_to_date_stay_separate_columns():
+    """A 10-Q prints the same period end twice, under different durations.
+
+    Keying values by the printed date collapsed the two blocks onto each other:
+    the year-to-date figures overwrote the quarterly ones and the statement
+    reported nine months of revenue as the quarter's, four columns wide.
+    """
+    st = parse_statement(QUARTERLY_OPERATIONS)
+
+    assert [c.label for c in st.columns] == [
+        "Jun. 27, 2026",
+        "Jun. 28, 2025",
+        "Jun. 27, 2026",
+        "Jun. 28, 2025",
+    ]
+    assert [c.duration for c in st.columns] == [
+        "3 Months Ended",
+        "3 Months Ended",
+        "9 Months Ended",
+        "9 Months Ended",
+    ]
+
+    sales = st.row_for("RevenueFromContractWithCustomerExcludingAssessedTax")
+    assert sales is not None
+    assert [sales.values[c.key] for c in st.columns] == [
+        Decimal(n) * 10**6 for n in ("109417", "94036", "364357", "313695")
+    ]
+
+
+def test_every_column_key_is_unique():
+    """The key is what `values` is keyed by, and what the client renders by."""
+    st = parse_statement(QUARTERLY_OPERATIONS)
+    keys = [c.key for c in st.columns]
+    assert len(set(keys)) == len(keys)

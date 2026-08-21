@@ -17,7 +17,8 @@ comparison, all of which need one consistent shape and cannot use as-filed rows.
 Structure of an exhibit
 -----------------------
     <th class="tl">   title, plus scale hints ("$ in Millions")
-    <th class="th">   one per period column ("Sep. 27, 2025")
+    <th class="th">   one per period column ("Sep. 27, 2025"), optionally under
+                      a spanning cell naming the duration ("3 Months Ended")
     <tr class="ro">   data row          <tr class="rou">  underlined = a total
     <td class="pl">   label, with the element name in an onclick handler
     <td class="nump"> positive number   <td class="num">  parenthesised negative
@@ -61,8 +62,8 @@ class AsFiledRow:
     #: Underlined in the rendering, i.e. a subtotal or total.
     is_total: bool
     indent: int
-    #: Keyed by column label. A missing key means the cell was blank, which is
-    #: how the filer indicates the line does not apply to that period.
+    #: Keyed by `AsFiledColumn.key`. A missing key means the cell was blank,
+    #: which is how the filer indicates the line does not apply to that period.
     values: dict[str, Decimal]
 
     @property
@@ -79,14 +80,38 @@ class AsFiledRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AsFiledColumn:
+    """One period column of a statement.
+
+    A quarterly statement of operations carries the same period *end* twice --
+    once under "3 Months Ended" and once under "9 Months Ended" -- so the
+    printed date does not identify a column. `key` does, and is what
+    `AsFiledRow.values` is keyed by.
+
+    The key is the column's ordinal position rather than anything derived from
+    the heading, because position is the only property the renderer guarantees
+    to be unique. Keying by the date silently collapsed the year-to-date
+    figures onto the quarterly ones, leaving a statement whose every number
+    looked plausible and was the wrong period.
+    """
+
+    key: str
+    #: The period end as the filer printed it, e.g. "Jun. 27, 2026".
+    label: str
+    #: The spanning heading this column sat under, e.g. "3 Months Ended".
+    #: None for an instant, which is how balance sheet columns arrive.
+    duration: str | None
+    date: date | None
+
+
+@dataclass(frozen=True, slots=True)
 class AsFiledStatement:
     """A statement exactly as the filer presented it."""
 
     title: str
     #: Column headings in the order rendered, most recent first as the SEC
     #: renders them.
-    columns: tuple[str, ...]
-    column_dates: tuple[date | None, ...]
+    columns: tuple[AsFiledColumn, ...]
     rows: tuple[AsFiledRow, ...]
     monetary_scale: Decimal = Decimal(1)
     share_scale: Decimal = Decimal(1)
@@ -122,8 +147,10 @@ def parse_statement(html: str) -> AsFiledStatement:
     title_text = _text(title_raw or "")
     monetary_scale, share_scale = _scales(title_text)
 
-    columns = tuple(_period_columns(html))
-    column_dates = tuple(_parse_date(c) for c in columns)
+    columns = tuple(
+        AsFiledColumn(key=str(index), label=label, duration=duration, date=_parse_date(label))
+        for index, (label, duration) in enumerate(_period_columns(html))
+    )
 
     rows: list[AsFiledRow] = []
     depth = 0
@@ -163,7 +190,7 @@ def parse_statement(html: str) -> AsFiledStatement:
                     continue
                 parsed = _parse_number(_text(body))
                 if parsed is not None:
-                    values[column] = parsed * scale
+                    values[column.key] = parsed * scale
 
         rows.append(
             AsFiledRow(
@@ -179,31 +206,53 @@ def parse_statement(html: str) -> AsFiledStatement:
     return AsFiledStatement(
         title=title_text,
         columns=columns,
-        column_dates=column_dates,
         rows=tuple(rows),
         monetary_scale=monetary_scale,
         share_scale=share_scale,
     )
 
 
-def _period_columns(html: str) -> list[str]:
-    """The period columns, excluding spanning group headers.
+def _period_columns(html: str) -> list[tuple[str, str | None]]:
+    """The period columns, as (date, duration) pairs.
 
-    Statements covering durations carry a two-row header: a spanning cell
-    reading "12 Months Ended" above the individual period dates. The spanning
-    cell is marked `colspan="3"` and is not a column of its own -- counting it
-    shifts every value one column to the left, silently mis-attributing an
-    entire statement to the wrong periods.
+    Statements covering durations carry a two-row header: spanning cells
+    reading "12 Months Ended" above the individual period dates. A spanning
+    cell is not a column of its own -- counting it as one shifts every value a
+    column to the left, silently mis-attributing an entire statement to the
+    wrong periods.
+
+    It is not noise either. A 10-Q prints two blocks side by side, "3 Months
+    Ended" and "9 Months Ended", and both carry the same period end date, so
+    the spanning cell is the only thing distinguishing the quarter from the
+    year to date. Its `colspan` says how many of the dates below belong to it.
     """
-    columns: list[str] = []
+    spans: list[tuple[str, int]] = []
+    dates: list[str] = []
+
     for attrs, body in re.findall(r'<th class="th"([^>]*)>(.*?)</th>', html, re.S):
-        colspan = re.search(r'colspan="(\d+)"', attrs)
-        if colspan is not None and int(colspan.group(1)) > 1:
-            continue
         text = _text(body)
-        if text:
-            columns.append(text)
-    return columns
+        if not text:
+            continue
+        colspan = re.search(r'colspan="(\d+)"', attrs)
+        width = int(colspan.group(1)) if colspan is not None else 1
+        if width > 1:
+            spans.append((text, width))
+        else:
+            dates.append(text)
+
+    # Flattened in order, so the nth date takes the heading whose run covers
+    # position n. A statement of instants has no spans and every column is
+    # left undated in duration terms, which is exactly right for a balance
+    # sheet. A single span covering everything ("12 Months Ended") labels all
+    # of them the same, which is also right.
+    durations: list[str | None] = []
+    for text, width in spans:
+        durations.extend([text] * width)
+
+    return [
+        (label, durations[index] if index < len(durations) else None)
+        for index, label in enumerate(dates)
+    ]
 
 
 def _scale_for(element: str | None, monetary: Decimal, shares: Decimal) -> Decimal:

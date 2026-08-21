@@ -98,7 +98,7 @@ export function headlineRows(statement: AsFiledStatement, limit = 3): AsFiledRow
   if (newest === undefined) return [];
 
   const usable = statement.rows.filter(
-    (row) => !row.is_abstract && row.values[newest] !== undefined,
+    (row) => !row.is_abstract && row.values[newest.key] !== undefined,
   );
 
   const totals = usable.filter((row) => row.is_total);

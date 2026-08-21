@@ -12,14 +12,17 @@ import {
 } from "@xyflow/react";
 
 import { NodeFrame } from "../NodeFrame";
+import { columnGroups, needsGroupRow } from "@/lib/columns";
 import { abbreviate, formatValue, scaleExponent } from "@/lib/decimal";
+import { formatFilingDate } from "@/lib/filings";
 import { fitScale, headlineCapacity, headlineRows, tierFor } from "@/lib/lod";
+import { statementTitle } from "@/lib/statementName";
 import {
+  DEFAULT_STATEMENT_HEIGHT,
   INDENT_STEP,
   LABEL_COLUMN,
   MIN_STATEMENT_HEIGHT,
   MIN_STATEMENT_WIDTH,
-  statementNodeHeight,
   VALUE_COLUMN,
 } from "@/lib/nodeSize";
 import type { AsFiledStatement } from "@/lib/types";
@@ -69,8 +72,8 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
   // The node's live height, which a resize changes. The level-of-detail
   // arithmetic has to read this rather than the default, or a statement
   // dragged taller would still budget its summary for the old size.
-  const nodeHeight = height ?? statementNodeHeight(statement);
-  const defaultHeight = statementNodeHeight(statement);
+  const nodeHeight = height ?? DEFAULT_STATEMENT_HEIGHT;
+  const defaultHeight = DEFAULT_STATEMENT_HEIGHT;
 
   // Both selectors collapse a continuous zoom to a value that changes a
   // handful of times, so this node re-renders on a step boundary rather than
@@ -80,15 +83,19 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
   const monetaryExp = scaleExponent(statement.monetary_scale);
   const shareExp = scaleExponent(statement.share_scale);
 
-  const filed = new Date(statement.filed).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  // Formatted from the date's own parts rather than through the runtime's
+  // locale, which differs between the server that rendered the HTML and the
+  // browser that hydrates it -- and shifts the day itself in any timezone
+  // behind UTC, since an EDGAR date has no time on it.
+  const filed = formatFilingDate(statement.filed);
 
   const summarised = tier !== "detail";
   const identityOnly = tier === "identity";
   const newest = statement.columns[0];
+
+  // Null when the durations say nothing the title does not already say, so an
+  // annual statement does not spend a row on "12 Months Ended".
+  const groups = needsGroupRow(statement.columns) ? columnGroups(statement.columns) : null;
 
   /**
    * Grow the panel until nothing is hidden, or put it back to the default.
@@ -126,7 +133,9 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
         // Zoomed out the ticker is what identifies the row; the full registrant
         // name is unreadable long before the panel stops being recognisable.
         eyebrow={summarised ? ticker : company}
-        title={statement.short_name}
+        // Shortened to the part that tells one statement from the next; the
+        // filer's full title stays a hover away.
+        title={<span title={statement.short_name}>{statementTitle(statement.short_name)}</span>}
         scale={summarised ? scale : 1}
         onDoubleClick={toggleFit}
         meta={
@@ -159,7 +168,7 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
               newest !== undefined &&
               headlineRows(statement, Math.min(3, headlineCapacity(nodeHeight, scale))).map(
                 (row, index) => {
-                  const raw = row.values[newest];
+                  const raw = row.values[newest.key];
                   if (raw === undefined) return null;
                   const perShare = isPerShare(row.element);
                   return (
@@ -208,6 +217,28 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
               style={{ width: "max-content", minWidth: "100%" }}
             >
               <thead className="sticky top-0 z-10 bg-surface">
+                {/* The durations, when there is more than one. A 10-Q prints
+                    the same two period ends under "3 Months Ended" and again
+                    under "9 Months Ended", so without this row the four
+                    columns read as two pairs of duplicates. */}
+                {groups !== null && (
+                  <tr>
+                    <th style={{ width: LABEL_COLUMN, minWidth: LABEL_COLUMN }} />
+                    {groups.map((group, groupIndex) => (
+                      <th
+                        key={groupIndex}
+                        colSpan={group.span}
+                        className={`eyebrow whitespace-nowrap px-3 pt-3 text-center text-[9px] ${
+                          groupIndex === 0 ? "text-ink-muted" : "text-ink-faint"
+                        }`}
+                      >
+                        <span className="block border-b border-hairline-strong pb-1">
+                          {group.duration}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                )}
                 <tr>
                   <th
                     className="border-b border-hairline px-4 pb-2 pt-3 text-left"
@@ -215,7 +246,10 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
                   />
                   {statement.columns.map((column, columnIndex) => (
                     <th
-                      key={column}
+                      // The label repeats across a 10-Q's two blocks, so it
+                      // cannot key the column -- React reported duplicate keys
+                      // and the values collided on the way through the API.
+                      key={column.key}
                       // The newest period is the one being read; the
                       // comparatives are context. Giving them all equal weight
                       // is what made the table a wall of identical figures.
@@ -224,7 +258,7 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
                       }`}
                       style={{ width: VALUE_COLUMN, minWidth: VALUE_COLUMN }}
                     >
-                      {column}
+                      {column.label}
                     </th>
                   ))}
                 </tr>
@@ -268,11 +302,11 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
                         {row.label}
                       </td>
                       {statement.columns.map((column, columnIndex) => {
-                        const value = row.values[column];
+                        const value = row.values[column.key];
                         const negative = value !== undefined && value.startsWith("-");
                         return (
                           <td
-                            key={column}
+                            key={column.key}
                             className={`tabular whitespace-nowrap px-3 py-[5px] text-right ${
                               columnIndex === 0 || row.is_total ? "" : "text-ink-faint"
                             }`}

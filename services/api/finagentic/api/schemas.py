@@ -160,10 +160,23 @@ class AsFiledRowOut(BaseModel):
     is_abstract: bool
     is_total: bool
     indent: int
-    #: Keyed by column label. A missing key means the cell was blank on the
-    #: face of the statement, which the filer uses to mean "not applicable",
-    #: not "zero".
+    #: Keyed by `AsFiledColumnOut.key`. A missing key means the cell was blank
+    #: on the face of the statement, which the filer uses to mean "not
+    #: applicable", not "zero".
     values: dict[str, str]
+
+
+class AsFiledColumnOut(BaseModel):
+    """One period column of a statement."""
+
+    #: Unique within the statement, and what `AsFiledRowOut.values` is keyed
+    #: by. `label` is not unique: a 10-Q prints the same period end under both
+    #: "3 Months Ended" and "9 Months Ended".
+    key: str
+    label: str
+    #: The spanning heading, e.g. "3 Months Ended". None for an instant.
+    duration: str | None = None
+    date: str | None = None
 
 
 class AsFiledStatementOut(BaseModel):
@@ -171,8 +184,7 @@ class AsFiledStatementOut(BaseModel):
 
     title: str
     short_name: str
-    columns: tuple[str, ...]
-    column_dates: tuple[str | None, ...]
+    columns: tuple[AsFiledColumnOut, ...]
     rows: tuple[AsFiledRowOut, ...]
     #: Multipliers already applied to `values`; retained so a client can render
     #: figures back at the scale the filing printed them.

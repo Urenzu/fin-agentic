@@ -10,10 +10,11 @@ import {
   MIN_STATEMENT_WIDTH,
   overflowsDefault,
   statementContentHeight,
-  statementNodeHeight,
-  statementNodeWidth,
   ENTITY_NODE_WIDTH,
-  entityNodeHeight,
+  ENTITY_NODE_HEIGHT,
+  LABEL_COLUMN,
+  STATEMENT_WIDTH,
+  VALUE_COLUMN,
 } from "./nodeSize";
 import type { AsFiledRow, AsFiledStatement } from "./types";
 
@@ -33,8 +34,12 @@ function statement(rowCount: number, columns = ["SEP. 27, 2025"]): AsFiledStatem
   return {
     title: "CONSOLIDATED BALANCE SHEETS",
     short_name: "Consolidated Balance Sheets",
-    columns,
-    column_dates: columns.map(() => null),
+    columns: columns.map((label, index) => ({
+      key: String(index),
+      label,
+      duration: null,
+      date: null,
+    })),
     rows: Array.from({ length: rowCount }, (_, i) => row({ label: `Line ${i}` })),
     monetary_scale: "1000000",
     share_scale: "1000",
@@ -45,15 +50,16 @@ function statement(rowCount: number, columns = ["SEP. 27, 2025"]): AsFiledStatem
   };
 }
 
-test("a short statement opens fully expanded and offers no fit control", () => {
+test("a short statement still opens at the standard height", () => {
+  // Panels in a row are one size, so a statement that needs less than the cell
+  // gets empty space under its last row rather than a smaller panel.
   const small = statement(6);
-  assert.equal(statementNodeHeight(small), statementContentHeight(small));
+  assert.ok(statementContentHeight(small) < DEFAULT_STATEMENT_HEIGHT);
   assert.equal(overflowsDefault(small), false);
 });
 
-test("a long statement opens capped, with content taller than the panel", () => {
+test("a long statement opens at the same height, with content taller than the panel", () => {
   const long = statement(90);
-  assert.equal(statementNodeHeight(long), DEFAULT_STATEMENT_HEIGHT);
   assert.ok(statementContentHeight(long) > DEFAULT_STATEMENT_HEIGHT);
   assert.equal(overflowsDefault(long), true);
 });
@@ -64,7 +70,7 @@ test("expanding to the content height is always a growth, never a shrink", () =>
   for (const count of [1, 5, 20, 24, 25, 40, 200]) {
     const s = statement(count);
     if (overflowsDefault(s)) {
-      assert.ok(statementContentHeight(s) > statementNodeHeight(s), `${count} rows`);
+      assert.ok(statementContentHeight(s) > DEFAULT_STATEMENT_HEIGHT, `${count} rows`);
     }
   }
 });
@@ -78,17 +84,14 @@ test("section headings are taller than data rows, so content height accounts for
   assert.ok(statementContentHeight(withSections) > statementContentHeight(plain));
 });
 
-test("width grows with the number of periods shown", () => {
-  const one = statementNodeWidth(statement(5, ["2025"]));
-  const three = statementNodeWidth(statement(5, ["2025", "2024", "2023"]));
-  assert.ok(three > one);
-  assert.ok(one >= MIN_STATEMENT_WIDTH);
-});
-
-test("a statement with no columns still gets a usable width", () => {
-  // Defensive: a filing whose exhibit parsed to zero periods must not collapse
-  // the node to the label column alone.
-  assert.ok(statementNodeWidth(statement(5, [])) >= MIN_STATEMENT_WIDTH);
+test("the standard width holds four periods and stays above the resize floor", () => {
+  // Every statement occupies one cell of the board's grid, so a 10-K row and a
+  // 10-Q row agree about where each column begins even though the two forms
+  // print a different number of periods. The cell is sized for four, which is
+  // the widest ordinary case: a 10-Q printing a quarter beside its year to
+  // date.
+  assert.ok(STATEMENT_WIDTH >= LABEL_COLUMN + 4 * VALUE_COLUMN);
+  assert.ok(STATEMENT_WIDTH >= MIN_STATEMENT_WIDTH);
 });
 
 test("the resize floor leaves room for the chrome plus real rows", () => {
@@ -115,24 +118,14 @@ test("clampSize survives a degenerate dimension", () => {
   }
 });
 
+test("the entity card opens at the same height as a statement", () => {
+  // A card 30px shorter than the panels beside it reads as a misalignment
+  // rather than a decision.
+  assert.equal(ENTITY_NODE_HEIGHT, DEFAULT_STATEMENT_HEIGHT);
+});
+
 test("the entity card's resize floors stay under the size it opens at", () => {
-  // A floor above the natural height would make the card jump on first drag.
-  const ready = {
-    registrant: { cik: 320193, name: "Apple Inc.", ticker: "AAPL" },
-    state: "ready" as const,
-    shape: null,
-    coverage: {
-      history_years: 19.7,
-      annual_reports: 17,
-      fact_count: 3513,
-      verified_count: 1686,
-      earliest: "2006-09-30",
-      latest: "2026-06-27",
-      looks_truncated: false,
-    },
-    error: null,
-    advisories: [],
-  };
-  assert.ok(MIN_ENTITY_HEIGHT < entityNodeHeight(ready));
+  // A floor above the opening size would make the card jump on first drag.
+  assert.ok(MIN_ENTITY_HEIGHT < ENTITY_NODE_HEIGHT);
   assert.ok(MIN_ENTITY_WIDTH < ENTITY_NODE_WIDTH);
 });

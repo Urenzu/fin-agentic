@@ -428,8 +428,15 @@ def _as_filed_out(statement, report, filing) -> s.AsFiledStatementOut:
         # SEC's renderer sometimes emits with characters already replaced by
         # question marks.
         short_name=statement.display_name or report.short_name,
-        columns=statement.columns,
-        column_dates=tuple(d.isoformat() if d else None for d in statement.column_dates),
+        columns=tuple(
+            s.AsFiledColumnOut(
+                key=column.key,
+                label=column.label,
+                duration=column.duration,
+                date=column.date.isoformat() if column.date else None,
+            )
+            for column in statement.columns
+        ),
         rows=tuple(
             s.AsFiledRowOut(
                 label=row.label,

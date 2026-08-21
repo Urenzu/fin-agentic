@@ -20,10 +20,9 @@ import { EntityNode, type EntityNodeType } from "./nodes/EntityNode";
 import { StatementNode, type StatementNodeType } from "./nodes/StatementNode";
 import {
   DEFAULT_STATEMENT_HEIGHT,
+  ENTITY_NODE_HEIGHT,
   ENTITY_NODE_WIDTH,
-  entityNodeHeight,
-  statementNodeHeight,
-  statementNodeWidth,
+  STATEMENT_WIDTH,
 } from "@/lib/nodeSize";
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
@@ -39,13 +38,38 @@ const nodeTypes: NodeTypes = {
 const COLUMN_GAP = 40;
 const ROW_GAP = 60;
 
+/**
+ * The board's grid.
+ *
+ * Every statement occupies one cell of the same size, so the nth statement of
+ * one filing sits directly above the nth of the next and the gaps between
+ * panels are the same everywhere. The alternative -- advancing by each panel's
+ * own width -- made the columns disagree between a 10-K row and a 10-Q row,
+ * since the two forms print a different number of periods.
+ */
+const COLUMN_PITCH = STATEMENT_WIDTH + COLUMN_GAP;
+const ROW_PITCH = DEFAULT_STATEMENT_HEIGHT + ROW_GAP;
+
+/** Where a company's filings begin, one gap right of its card. */
+const STATEMENT_ORIGIN_X = ENTITY_NODE_WIDTH + COLUMN_GAP;
+
+/**
+ * The zoom a newly opened filing is never framed below.
+ *
+ * A company card and a filing row two bands down only fit together at around
+ * 0.5, which is under `SUMMARY_BELOW` -- so fitting both collapsed the
+ * statements just opened into headline figures. Reading size wins, and the
+ * card stays a short pan away.
+ */
+const READING_ZOOM = 0.7;
+
 function entityNode(entity: Entity, origin: { x: number; y: number }): EntityNodeType {
   return {
     id: `entity-${entity.registrant.cik}`,
     type: "entity",
     position: origin,
     width: ENTITY_NODE_WIDTH,
-    height: entityNodeHeight(entity),
+    height: ENTITY_NODE_HEIGHT,
     data: { entity },
     dragHandle: ".drag-handle",
   };
@@ -62,32 +86,29 @@ function entityNode(entity: Entity, origin: { x: number; y: number }): EntityNod
  * The row is indented past the entity column so a company's filings stack
  * under its card rather than beside it -- several filings can be open at once,
  * and each needs a row it does not share.
+ *
+ * Columns advance by a fixed pitch rather than by each panel's own width, so
+ * every filing's statements land on the same grid.
  */
 function statementRow(
   registrant: Registrant,
   statements: AsFiledStatement[],
   origin: { x: number; y: number },
 ): StatementNodeType[] {
-  const nodes: StatementNodeType[] = [];
-  let x = origin.x;
-  for (const statement of statements) {
-    nodes.push({
-      id: statementNodeId(registrant.cik, statement),
-      type: "statement",
-      position: { x, y: origin.y },
-      width: statementNodeWidth(statement),
-      height: statementNodeHeight(statement),
-      data: {
-        cik: registrant.cik,
-        company: registrant.name,
-        ticker: registrant.ticker || `CIK ${registrant.cik}`,
-        statement,
-      },
-      dragHandle: ".drag-handle",
-    });
-    x += statementNodeWidth(statement) + COLUMN_GAP;
-  }
-  return nodes;
+  return statements.map((statement, index) => ({
+    id: statementNodeId(registrant.cik, statement),
+    type: "statement",
+    position: { x: origin.x + index * COLUMN_PITCH, y: origin.y },
+    width: STATEMENT_WIDTH,
+    height: DEFAULT_STATEMENT_HEIGHT,
+    data: {
+      cik: registrant.cik,
+      company: registrant.name,
+      ticker: registrant.ticker || `CIK ${registrant.cik}`,
+      statement,
+    },
+    dragHandle: ".drag-handle",
+  }));
 }
 
 function statementNodeId(cik: number, statement: AsFiledStatement): string {
@@ -130,7 +151,15 @@ function BoardInner() {
 
     const target = focusTarget.current;
     const framed = target === null ? nodes : nodes.filter((node) => target.includes(node.id));
-    const view = frame(framed.length > 0 ? framed : nodes, box.width, box.height);
+    const boxes = framed.length > 0 ? framed : nodes;
+
+    // The last target is what the reader just asked for -- the opened row's
+    // first statement, or the card itself on a fresh search -- so that is what
+    // stays centred if the two cannot be shown together at reading size.
+    const anchorId = target?.[target.length - 1];
+    const anchor = boxes.find((node) => node.id === anchorId);
+
+    const view = frame(boxes, box.width, box.height, { minZoom: READING_ZOOM, anchor });
     if (view) void setViewport(view, { duration: 400 });
   }, [focusToken, nodes, setViewport]);
 
@@ -139,18 +168,11 @@ function BoardInner() {
       setNodes((current) =>
         current.map((node) =>
           node.id === `entity-${entity.registrant.cik}`
-            ? ({
-                ...node,
-                // The card grows when ingestion replaces the placeholder text
-                // with a stat grid and any advisories, so its declared height
-                // has to move with it -- unless the reader has already sized it
-                // themselves, in which case theirs wins.
-                height:
-                  node.type === "entity" && node.data.sized === true
-                    ? node.height
-                    : entityNodeHeight(entity),
-                data: { ...node.data, entity },
-              } as BoardNode)
+            ? // Height is deliberately left alone. The card is a fixed cell of
+              // the grid, so there is nothing to recompute as ingestion fills
+              // it in -- and not touching it means a card the reader has
+              // dragged taller keeps the size they gave it.
+              ({ ...node, data: { ...node.data, entity } } as BoardNode)
             : node,
         ),
       );
@@ -242,8 +264,8 @@ function BoardInner() {
           const origin = origins.current.get(registrant.cik) ?? 0;
           const taken = rowCounts.current.get(registrant.cik) ?? 0;
           const row = statementRow(registrant, statements, {
-            x: ENTITY_NODE_WIDTH + COLUMN_GAP,
-            y: origin + taken * (DEFAULT_STATEMENT_HEIGHT + ROW_GAP),
+            x: STATEMENT_ORIGIN_X,
+            y: origin + taken * ROW_PITCH,
           });
           rowCounts.current.set(registrant.cik, taken + 1);
 

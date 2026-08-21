@@ -34,7 +34,7 @@ export function NodeFrame({
 
   return (
     // Fills the node box, whose size react-flow is told up front rather than
-    // left to measure -- see statementNodeHeight.
+    // left to measure -- see nodeSize.ts.
     <div className="panel panel-frame relative flex h-full w-full flex-col overflow-hidden rounded-xl">
       <header
         onDoubleClick={onDoubleClick}

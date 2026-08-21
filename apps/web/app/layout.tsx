@@ -40,7 +40,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    // Extensions write their own attributes onto <html> before React
+    // hydrates -- an ad blocker and a password manager both landed
+    // `data-beeline-*` here -- and React reports the difference as a
+    // hydration mismatch in the app's own layout. Suppression applies to this
+    // element's attributes only, one level deep, so a real mismatch anywhere
+    // inside the app is still reported.
+    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
       <body className="h-full overflow-hidden bg-void text-ink antialiased">{children}</body>
     </html>
   );

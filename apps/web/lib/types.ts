@@ -44,15 +44,27 @@ export type AsFiledRow = {
   is_abstract: boolean;
   is_total: boolean;
   indent: number;
-  /** Keyed by column label. A missing key is a blank cell, not a zero. */
+  /** Keyed by `AsFiledColumn.key`. A missing key is a blank cell, not a zero. */
   values: Record<string, string>;
+};
+
+export type AsFiledColumn = {
+  /**
+   * Unique within the statement, and what `AsFiledRow.values` is keyed by.
+   * `label` is not unique: a 10-Q prints the same period end under both
+   * "3 Months Ended" and "9 Months Ended".
+   */
+  key: string;
+  label: string;
+  /** The spanning heading, e.g. "3 Months Ended". Null for an instant. */
+  duration: string | null;
+  date: string | null;
 };
 
 export type AsFiledStatement = {
   title: string;
   short_name: string;
-  columns: string[];
-  column_dates: (string | null)[];
+  columns: AsFiledColumn[];
   rows: AsFiledRow[];
   monetary_scale: string;
   share_scale: string;

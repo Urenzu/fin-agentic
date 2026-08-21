@@ -10,7 +10,8 @@
  * node's height is a number we own, not something the DOM reports back.
  */
 
-import type { AsFiledStatement, Entity } from "./types";
+import { needsGroupRow } from "./columns";
+import type { AsFiledStatement } from "./types";
 
 export const LABEL_COLUMN = 300;
 export const VALUE_COLUMN = 108;
@@ -18,10 +19,24 @@ export const INDENT_STEP = 13;
 
 export const HEADER_HEIGHT = 66;
 export const COLUMN_HEADER_HEIGHT = 34;
+/** The "3 Months Ended" row a quarterly statement carries above its dates. */
+export const GROUP_HEADER_HEIGHT = 26;
 export const DATA_ROW_HEIGHT = 24;
 export const SECTION_ROW_HEIGHT = 31;
 
-/** The height a statement opens at. Beyond this it scrolls until resized. */
+/**
+ * The height every statement opens at. Beyond this it scrolls until resized.
+ *
+ * Uniform for the same reason `STATEMENT_WIDTH` is: one cell of the board's
+ * grid. Opening each panel at its own content height, capped here, meant a
+ * short statement -- comprehensive income runs about 500px -- came up
+ * noticeably smaller than the operations statement beside it, and a row that
+ * should read as a set looked like a mistake instead.
+ *
+ * The cost is a band of empty panel under a short statement's last row. That
+ * is the quieter of the two, and a double click on the header still fits any
+ * panel to its own content.
+ */
 export const DEFAULT_STATEMENT_HEIGHT = 560;
 
 /**
@@ -32,9 +47,20 @@ export const DEFAULT_STATEMENT_HEIGHT = 560;
 export const MIN_STATEMENT_WIDTH = LABEL_COLUMN + VALUE_COLUMN;
 export const MIN_STATEMENT_HEIGHT = HEADER_HEIGHT + COLUMN_HEADER_HEIGHT + DATA_ROW_HEIGHT * 4;
 
-export function statementNodeWidth(statement: AsFiledStatement): number {
-  return LABEL_COLUMN + Math.max(statement.columns.length, 1) * VALUE_COLUMN + 32;
-}
+/**
+ * The width every statement opens at.
+ *
+ * Fixed rather than fitted to the column count, so that the nth statement of
+ * one filing lines up with the nth statement of every other. Sizing each panel
+ * to its own content left the board ragged: a 10-Q's four-column operations
+ * statement is 764 wide and a 10-K's three-column one is 656, so the two rows
+ * disagreed about where the second column began and nothing lined up.
+ *
+ * Sized for four periods, which is the widest ordinary case -- a 10-Q printing
+ * a quarter beside its year to date. A statement with more columns than that
+ * scrolls sideways inside its panel, and can be dragged wider.
+ */
+export const STATEMENT_WIDTH = LABEL_COLUMN + 4 * VALUE_COLUMN + 32;
 
 /**
  * The height at which every row is visible and nothing scrolls.
@@ -49,12 +75,8 @@ export function statementContentHeight(statement: AsFiledStatement): number {
     (total, row) => total + (row.is_abstract ? SECTION_ROW_HEIGHT : DATA_ROW_HEIGHT),
     0,
   );
-  return HEADER_HEIGHT + COLUMN_HEADER_HEIGHT + body + 12;
-}
-
-/** The height the node is created at: its content, capped. */
-export function statementNodeHeight(statement: AsFiledStatement): number {
-  return Math.min(statementContentHeight(statement), DEFAULT_STATEMENT_HEIGHT);
+  const groupRow = needsGroupRow(statement.columns) ? GROUP_HEADER_HEIGHT : 0;
+  return HEADER_HEIGHT + COLUMN_HEADER_HEIGHT + groupRow + body + 12;
 }
 
 /** Whether opening this statement at its default height hides anything. */
@@ -68,30 +90,19 @@ export const ENTITY_NODE_WIDTH = 360;
 export const MIN_ENTITY_WIDTH = 200;
 export const MIN_ENTITY_HEIGHT = 120;
 
-const CHARS_PER_LINE = 52;
-const LINE_HEIGHT = 16;
-
-/** The filing picker: form toggle, and a scrollable list under it. */
-const FILING_PICKER_HEIGHT = 300;
-
 /**
- * The entity card's height for the state it is in.
+ * The entity card fills the same cell as a statement.
  *
- * Recomputed whenever the entity changes, because the card grows as ingestion
- * finishes: a "building the ledger" sentence becomes a stat grid, and an
- * unsupported filer adds an advisory.
+ * It used to size itself to its contents and so came up about 30px shorter
+ * than the statements beside it -- close enough to read as a misalignment
+ * rather than as a decision. Deriving it from the statement height means the
+ * two can never drift apart.
+ *
+ * The card's body scrolls, so a filer carrying several advisories still shows
+ * all of them; the card grew to fit them before, and can still be dragged
+ * taller.
  */
-export function entityNodeHeight(entity: Entity): number {
-  const chrome = 66 + 24;
-  const body = entity.coverage
-    ? 92 + (entity.coverage.earliest && entity.coverage.latest ? 46 : 0)
-    : 64;
-  const advisories = entity.advisories.reduce(
-    (total, advisory) => total + 26 + Math.ceil(advisory.length / CHARS_PER_LINE) * LINE_HEIGHT,
-    0,
-  );
-  return chrome + body + FILING_PICKER_HEIGHT + advisories;
-}
+export const ENTITY_NODE_HEIGHT = DEFAULT_STATEMENT_HEIGHT;
 
 /** Keep a resized dimension inside what the node can usefully be. */
 export function clampSize(value: number, min: number, max = Number.MAX_SAFE_INTEGER): number {

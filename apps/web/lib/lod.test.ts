@@ -31,8 +31,12 @@ function statement(rows: AsFiledRow[], columns = ["SEP. 27, 2025"]): AsFiledStat
   return {
     title: "CONSOLIDATED STATEMENTS OF OPERATIONS",
     short_name: "Consolidated Statements of Operations",
-    columns,
-    column_dates: columns.map(() => null),
+    columns: columns.map((label, index) => ({
+      key: String(index),
+      label,
+      duration: null,
+      date: null,
+    })),
     rows,
     monetary_scale: "1000000",
     share_scale: "1000",
@@ -75,10 +79,10 @@ test("the summary threshold sits above the identity threshold", () => {
 
 test("headlineRows prefers the filer's own totals", () => {
   const s = statement([
-    row({ label: "Net sales", values: { "SEP. 27, 2025": "416161000000" } }),
-    row({ label: "Cost of sales", values: { "SEP. 27, 2025": "220980000000" } }),
-    row({ label: "Gross margin", is_total: true, values: { "SEP. 27, 2025": "195201000000" } }),
-    row({ label: "Net income", is_total: true, values: { "SEP. 27, 2025": "112010000000" } }),
+    row({ label: "Net sales", values: { 0: "416161000000" } }),
+    row({ label: "Cost of sales", values: { 0: "220980000000" } }),
+    row({ label: "Gross margin", is_total: true, values: { 0: "195201000000" } }),
+    row({ label: "Net income", is_total: true, values: { 0: "112010000000" } }),
   ]);
   assert.deepEqual(
     headlineRows(s).map((r) => r.label),
@@ -88,8 +92,8 @@ test("headlineRows prefers the filer's own totals", () => {
 
 test("headlineRows falls back to plain rows when nothing is marked a total", () => {
   const s = statement([
-    row({ label: "Net income", values: { "SEP. 27, 2025": "112010000000" } }),
-    row({ label: "Other comprehensive income", values: { "SEP. 27, 2025": "1000000" } }),
+    row({ label: "Net income", values: { 0: "112010000000" } }),
+    row({ label: "Other comprehensive income", values: { 0: "1000000" } }),
   ]);
   assert.deepEqual(
     headlineRows(s).map((r) => r.label),
@@ -103,7 +107,7 @@ test("headlineRows skips section headings and blank cells", () => {
     // Marked a total but absent from the newest column: rendering it would put
     // an em dash where the headline figure should be.
     row({ label: "Discontinued operations", is_total: true, values: {} }),
-    row({ label: "Total assets", is_total: true, values: { "SEP. 27, 2025": "359241000000" } }),
+    row({ label: "Total assets", is_total: true, values: { 0: "359241000000" } }),
   ]);
   assert.deepEqual(
     headlineRows(s).map((r) => r.label),
@@ -114,7 +118,7 @@ test("headlineRows skips section headings and blank cells", () => {
 test("headlineRows honours its limit and tolerates a statement with no columns", () => {
   const many = statement(
     Array.from({ length: 9 }, (_, i) =>
-      row({ label: `Total ${i}`, is_total: true, values: { "SEP. 27, 2025": "1" } }),
+      row({ label: `Total ${i}`, is_total: true, values: { 0: "1" } }),
     ),
   );
   assert.equal(headlineRows(many).length, 3);

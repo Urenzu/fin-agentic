@@ -37,6 +37,22 @@ export function boundsOf(boxes: readonly Box[]): {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+export type FrameOptions = {
+  /** Never zoom past this. */
+  maxZoom?: number;
+  /**
+   * Never zoom below this, even if the boxes then overflow the pane.
+   *
+   * Fitting everything is the wrong goal when the reader has just asked to
+   * read something: the box spanning a company card and a filing row two bands
+   * down fits only at a zoom that collapses the statements into headline
+   * figures, which is precisely what opening them was meant to avoid.
+   */
+  minZoom?: number;
+  /** What to centre on when the floor wins and the boxes no longer fit. */
+  anchor?: Box;
+};
+
 /**
  * The viewport that centres `boxes` inside a `width` x `height` pane.
  *
@@ -47,7 +63,7 @@ export function frame(
   boxes: readonly Box[],
   width: number,
   height: number,
-  maxZoom = 1,
+  { maxZoom = 1, minZoom = 0, anchor }: FrameOptions = {},
 ): Viewport | null {
   const bounds = boundsOf(boxes);
   if (bounds === null) return null;
@@ -55,15 +71,22 @@ export function frame(
   const availableWidth = Math.max(width - EDGE * 2, 1);
   const availableHeight = Math.max(height - HUD_INSET - EDGE, 1);
 
-  const zoom = Math.min(
+  const fitted = Math.min(
     bounds.width > 0 ? availableWidth / bounds.width : maxZoom,
     bounds.height > 0 ? availableHeight / bounds.height : maxZoom,
     maxZoom,
   );
 
+  const zoom = Math.max(fitted, Math.min(minZoom, maxZoom));
+
+  // Once the floor has overruled the fit, the bounds are wider or taller than
+  // the pane, and centring them would push the thing the reader asked for off
+  // one edge while showing empty canvas at the other. Centre the anchor.
+  const focus = (zoom > fitted ? boundsOf(anchor ? [anchor] : []) : null) ?? bounds;
+
   return {
-    x: EDGE + (availableWidth - bounds.width * zoom) / 2 - bounds.x * zoom,
-    y: HUD_INSET + (availableHeight - bounds.height * zoom) / 2 - bounds.y * zoom,
+    x: EDGE + (availableWidth - focus.width * zoom) / 2 - focus.x * zoom,
+    y: HUD_INSET + (availableHeight - focus.height * zoom) / 2 - focus.y * zoom,
     zoom,
   };
 }

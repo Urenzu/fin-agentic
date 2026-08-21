@@ -1,30 +1,15 @@
 "use client";
 
-import {
-  Handle,
-  NodeResizer,
-  Position,
-  useReactFlow,
-  useStore,
-  type NodeProps,
-  type Node,
-} from "@xyflow/react";
+import { Handle, NodeResizer, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
 
 import { FilingPicker } from "../FilingPicker";
 import { NodeFrame } from "../NodeFrame";
 import { fitScale, tierFor } from "@/lib/lod";
-import { entityNodeHeight, MIN_ENTITY_HEIGHT, MIN_ENTITY_WIDTH } from "@/lib/nodeSize";
+import { ENTITY_NODE_HEIGHT, MIN_ENTITY_HEIGHT, MIN_ENTITY_WIDTH } from "@/lib/nodeSize";
 import type { Entity } from "@/lib/types";
 
 export type EntityNodeData = {
   entity: Entity;
-  /**
-   * Set once the reader has resized the card by hand.
-   *
-   * The card's height is otherwise recomputed as ingestion fills it in, which
-   * would undo a manual resize the moment the ledger finished loading.
-   */
-  sized?: boolean;
 };
 
 export type EntityNodeType = Node<EntityNodeData, "entity">;
@@ -49,34 +34,13 @@ const STATE_STYLES: Record<Entity["state"], string> = {
   error: "border-negative/40 text-negative",
 };
 
-export function EntityNode({ id, data, height: live }: NodeProps<EntityNodeType>) {
+export function EntityNode({ data, height: live }: NodeProps<EntityNodeType>) {
   const { entity } = data;
   const { registrant, coverage, shape } = entity;
-  const { setNodes } = useReactFlow();
 
-  const height = live ?? entityNodeHeight(entity);
+  const height = live ?? ENTITY_NODE_HEIGHT;
 
-  /**
-   * Remember that this card was sized by hand.
-   *
-   * Its height is otherwise recomputed as ingestion fills it in, which would
-   * undo a manual resize the moment the ledger finished loading.
-   */
-  const markSized = () => {
-    setNodes((nodes) =>
-      nodes.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, sized: true } } : node,
-      ),
-    );
-  };
-
-  const resizer = (
-    <NodeResizer
-      minWidth={MIN_ENTITY_WIDTH}
-      minHeight={MIN_ENTITY_HEIGHT}
-      onResizeEnd={markSized}
-    />
-  );
+  const resizer = <NodeResizer minWidth={MIN_ENTITY_WIDTH} minHeight={MIN_ENTITY_HEIGHT} />;
   // See StatementNode: selecting the stepped value rather than the raw zoom is
   // what keeps this off the per-frame render path.
   const tier = useStore((state) => tierFor(state.transform[2]));
