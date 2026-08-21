@@ -279,3 +279,70 @@ def test_every_precedence_entry_is_mapped_to_its_own_concept():
 def test_unranked_tags_never_outrank_preferred_ones():
     preferred = TAG_PRECEDENCE[Concept.REVENUE][0]
     assert tag_rank(Concept.REVENUE, preferred) < tag_rank(Concept.REVENUE, "SomeOtherTag")
+
+
+# ---------------------------------------------------------------------------
+# tag map completeness
+# ---------------------------------------------------------------------------
+
+
+#: Concepts whose name is ours, not the SEC's. Nothing in EDGAR is tagged with
+#: these, so their absence from the tag map is deliberate rather than a hole:
+#: revenue and pre-tax income arrive under several real element names, and the
+#: cash roll-forward endpoints are derived from an instant, not tagged.
+SYNTHETIC_CONCEPT_NAMES = frozenset(
+    {
+        "Revenue",
+        "OtherOperatingExpense",
+        "IncomeLossBeforeIncomeTaxes",
+        "CashAndCashEquivalentsAtCarryingValueBeginningOfPeriod",
+        "CashAndCashEquivalentsAtCarryingValueEndOfPeriod",
+    }
+)
+
+
+def test_every_concept_named_after_a_real_element_maps_that_element():
+    """A concept whose own us-gaap name is missing from the map is invisible.
+
+    `OtherNonoperatingIncomeExpense` was exactly this: the concept existed, the
+    element existed, and nothing joined them, so 1,748 observations across ten
+    filers landed in the ledger as nothing. The failure is silent by nature --
+    there is no error, only a fact that never arrives -- so it needs a test
+    rather than a reader noticing.
+    """
+    from finagentic.domain.concepts import Concept
+    from finagentic.ingest.tag_map import TAG_TO_CONCEPT
+
+    unmapped = sorted(
+        concept.value
+        for concept in Concept
+        if concept.value not in TAG_TO_CONCEPT
+        and concept.value not in SYNTHETIC_CONCEPT_NAMES
+    )
+    assert unmapped == [], (
+        f"these concepts are named after us-gaap elements that the tag map does "
+        f"not carry, so a filer tagging them is ignored: {unmapped}. Either add "
+        f"the mapping or record the name in SYNTHETIC_CONCEPT_NAMES."
+    )
+
+
+def test_the_synthetic_list_does_not_hide_a_real_mapping():
+    """A name added to the exemption list and then mapped anyway is stale."""
+    from finagentic.ingest.tag_map import TAG_TO_CONCEPT
+
+    both = sorted(SYNTHETIC_CONCEPT_NAMES & set(TAG_TO_CONCEPT))
+    assert both == [], f"mapped after all, so remove from the exemption list: {both}"
+
+
+def test_every_precedence_entry_is_a_tag_the_map_knows():
+    """Precedence ranks aliases. Ranking a tag that maps to nothing is a typo
+    that quietly does nothing."""
+    from finagentic.ingest.tag_map import TAG_PRECEDENCE, TAG_TO_CONCEPT
+
+    for concept, tags in TAG_PRECEDENCE.items():
+        for tag in tags:
+            assert tag in TAG_TO_CONCEPT, f"{concept.value} ranks unmapped tag {tag!r}"
+            assert TAG_TO_CONCEPT[tag] is concept, (
+                f"{concept.value} ranks {tag!r}, which maps to "
+                f"{TAG_TO_CONCEPT[tag].value}"
+            )

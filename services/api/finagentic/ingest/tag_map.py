@@ -61,6 +61,11 @@ TAG_TO_CONCEPT: dict[str, Concept] = {
     "InterestExpenseNonoperating": Concept.INTEREST_EXPENSE,
     "InvestmentIncomeInterest": Concept.INTEREST_INCOME,
     "NonoperatingIncomeExpense": Concept.OTHER_NONOPERATING_INCOME,
+    # The aggregate above and this residual line are different elements, and
+    # filers that print "Other income/(expense), net" on the face of the income
+    # statement often tag only this one. It was absent from the map, so 1,748
+    # observations across ten filers reached the ledger as nothing at all.
+    "OtherNonoperatingIncomeExpense": Concept.OTHER_NONOPERATING_INCOME,
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": Concept.PRETAX_INCOME,
     "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments": Concept.PRETAX_INCOME,
     "IncomeTaxExpenseBenefit": Concept.INCOME_TAX_EXPENSE,
@@ -200,6 +205,12 @@ TAG_PRECEDENCE: dict[Concept, tuple[str, ...]] = {
         "CostOfRevenue",
         "CostOfGoodsSold",
         "CostOfServices",
+    ),
+    # The aggregate wins: it is what the income statement subtotal expects, and
+    # a filer printing both means the residual is inside it.
+    Concept.OTHER_NONOPERATING_INCOME: (
+        "NonoperatingIncomeExpense",
+        "OtherNonoperatingIncomeExpense",
     ),
     Concept.LONG_TERM_DEBT: ("LongTermDebtNoncurrent", "LongTermDebt"),
     Concept.COMMON_STOCK_AND_APIC: (
