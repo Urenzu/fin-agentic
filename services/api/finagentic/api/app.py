@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from finagentic.api import schemas as s
 from finagentic.api.service import (
@@ -38,6 +39,12 @@ app = FastAPI(
     version="0.1.0",
     summary="Verified financial statement analysis from SEC filings",
 )
+
+# Statement responses are highly repetitive JSON -- the same keys per row, the
+# same date strings per column -- and compress by roughly 5x. The threshold
+# keeps small responses, like a ticker search, from paying for a compressor
+# that would not save a packet.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.add_middleware(
     CORSMiddleware,
@@ -413,9 +420,10 @@ def get_as_filed(
     try:
         filing = _latest_filing(as_filed, registrant, form, accession)
         reports = as_filed.statement_index(filing)
+        statements = as_filed.statements(filing, reports)
         return tuple(
-            _as_filed_out(as_filed.statement(filing, report), report, filing)
-            for report in reports
+            _as_filed_out(statement, report, filing)
+            for statement, report in zip(statements, reports, strict=True)
         )
     except EdgarError as exc:
         raise HTTPException(502, str(exc)) from exc

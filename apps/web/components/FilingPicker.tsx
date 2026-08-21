@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useBoardActions } from "./BoardActions";
 import { api, ApiError } from "@/lib/api";
@@ -20,10 +20,19 @@ const LIMIT = 20;
  * quarter. Interleaving them invites reading across that seam.
  */
 export function FilingPicker({ registrant }: { registrant: Registrant }) {
-  const { toggleFiling, openAccessions, pendingAccessions } = useBoardActions();
+  const { toggleFiling, prefetchFiling, openAccessions, pendingAccessions } = useBoardActions();
   const [form, setForm] = useState<FilingForm>("10-K");
   const [filings, setFilings] = useState<FilingIndex[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The registrant object is rebuilt each time ingestion reports progress, so
+  // depending on it would refetch the list two or three times per search for
+  // an answer that only ever depends on the CIK. The ref keeps the current
+  // object reachable without making its identity a trigger.
+  const current = useRef(registrant);
+  current.current = registrant;
+
+  const { cik } = registrant;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -31,15 +40,21 @@ export function FilingPicker({ registrant }: { registrant: Registrant }) {
     setError(null);
 
     api
-      .filings(registrant.cik, form, LIMIT, controller.signal)
-      .then((rows) => setFilings(rows))
+      .filings(cik, form, LIMIT, controller.signal)
+      .then((rows) => {
+        setFilings(rows);
+        // The newest filing is what most readers open, and the list arriving
+        // is the earliest moment we know which one that is.
+        const newest = rows[0];
+        if (newest !== undefined) prefetchFiling(current.current, newest);
+      })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setError(cause instanceof ApiError ? cause.message : "Could not list filings.");
       });
 
     return () => controller.abort();
-  }, [registrant.cik, form]);
+  }, [cik, form, prefetchFiling]);
 
   return (
     <div className="mt-4 border-t border-hairline pt-3">
@@ -78,6 +93,11 @@ export function FilingPicker({ registrant }: { registrant: Registrant }) {
               key={filing.accession}
               type="button"
               onClick={() => toggleFiling(registrant, filing)}
+              // The pause between reading a row and clicking it is enough to
+              // have fetched it. Focus counts too, so keyboard users get the
+              // same head start.
+              onPointerEnter={() => prefetchFiling(registrant, filing)}
+              onFocus={() => prefetchFiling(registrant, filing)}
               title={
                 open
                   ? "Take these statements off the board"

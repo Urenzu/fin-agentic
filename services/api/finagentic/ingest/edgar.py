@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import re
-import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -29,6 +29,9 @@ from typing import Any
 
 import httpx
 
+from finagentic.ingest.ratelimit import TokenBucket
+from finagentic.store.cache import BlobCache, NullCache, build_cache
+
 SEC_BASE = "https://www.sec.gov"
 SEC_DATA_BASE = "https://data.sec.gov"
 
@@ -37,8 +40,20 @@ SEC_DATA_BASE = "https://data.sec.gov"
 #: Override with FINAGENTIC_SEC_USER_AGENT rather than editing this default.
 DEFAULT_USER_AGENT = "fin-agentic (contact: set FINAGENTIC_SEC_USER_AGENT)"
 
-#: SEC asks for no more than 10 requests/second. We stay well under.
-MIN_REQUEST_INTERVAL_SECONDS = 0.15
+#: SEC asks for no more than 10 requests/second. Eight leaves headroom for the
+#: clock skew between our timer and theirs without giving away a third of the
+#: budget, which a conservative fixed sleep did.
+REQUESTS_PER_SECOND = 8.0
+
+#: How many requests may be issued back to back after an idle moment. One
+#: filing is `FilingSummary.xml` plus its exhibits, so a burst that covers a
+#: whole filing is the unit of work worth optimising for.
+REQUEST_BURST = 8
+
+#: Concurrent connections to EDGAR. The token bucket governs the rate; this
+#: bounds how many sockets are open at once, which is a politeness limit rather
+#: than a throughput one -- past a handful the rate limit is binding anyway.
+MAX_CONCURRENT_REQUESTS = 6
 
 
 class EdgarError(RuntimeError):
@@ -182,18 +197,27 @@ class EdgarClient:
         *,
         user_agent: str = DEFAULT_USER_AGENT,
         cache_dir: Path | None = None,
+        cache: BlobCache | None = None,
         timeout: float = 30.0,
         client: httpx.Client | None = None,
+        rate: float = REQUESTS_PER_SECOND,
+        burst: float = REQUEST_BURST,
     ) -> None:
         self._headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"}
-        self._cache_dir = cache_dir
         self._owns_client = client is None
         self._client = client or httpx.Client(timeout=timeout, headers=self._headers)
-        self._last_request_at = 0.0
+        self._bucket = TokenBucket(rate=rate, capacity=burst)
         self._tickers: dict[str, Registrant] | None = None
 
-        if self._cache_dir is not None:
-            self._cache_dir.mkdir(parents=True, exist_ok=True)
+        # `cache` wins when given; `cache_dir` is the convenience the settings
+        # object uses. Neither means nothing is remembered, which is what a
+        # test wants unless it says otherwise.
+        if cache is not None:
+            self._cache: BlobCache = cache
+        elif cache_dir is not None:
+            self._cache = build_cache(cache_dir)
+        else:
+            self._cache = NullCache()
 
     def __enter__(self) -> EdgarClient:
         return self
@@ -207,22 +231,19 @@ class EdgarClient:
 
     # ---- HTTP ------------------------------------------------------------
 
-    def _throttle(self) -> None:
-        elapsed = time.monotonic() - self._last_request_at
-        if elapsed < MIN_REQUEST_INTERVAL_SECONDS:
-            time.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
-        self._last_request_at = time.monotonic()
+    def _fetch(self, url: str, cache_key: str | None) -> str:
+        """One document, from the cache if it is there.
 
-    def _get_json(self, url: str, *, cache_key: str | None = None) -> dict[str, Any]:
-        cache_path = (
-            self._cache_dir / f"{cache_key}.json"
-            if self._cache_dir is not None and cache_key
-            else None
-        )
-        if cache_path is not None and cache_path.exists():
-            return json.loads(cache_path.read_text(encoding="utf-8"))
+        EDGAR documents are immutable once filed -- an accession number names a
+        specific submission, and `companyfacts` changes only when the company
+        files again -- so a hit needs no revalidation.
+        """
+        if cache_key:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
 
-        self._throttle()
+        self._bucket.take()
         try:
             response = self._client.get(url, headers=self._headers)
         except httpx.HTTPError as exc:
@@ -235,37 +256,67 @@ class EdgarClient:
                 "EDGAR rejected the request (403). This is almost always a "
                 "missing or non-descriptive User-Agent header."
             )
-        if response.status_code != 200:
-            raise EdgarError(f"EDGAR returned {response.status_code} for {url}")
-
-        payload: dict[str, Any] = response.json()
-        if cache_path is not None:
-            cache_path.write_text(json.dumps(payload), encoding="utf-8")
-        return payload
-
-    def _get_text(self, url: str, *, cache_key: str | None = None) -> str:
-        """Fetch a non-JSON document, cached the same way."""
-        cache_path = (
-            self._cache_dir / f"{cache_key}.txt"
-            if self._cache_dir is not None and cache_key
-            else None
-        )
-        if cache_path is not None and cache_path.exists():
-            return cache_path.read_text(encoding="utf-8")
-
-        self._throttle()
-        try:
-            response = self._client.get(url, headers=self._headers)
-        except httpx.HTTPError as exc:
-            raise EdgarError(f"request to {url} failed: {exc}") from exc
-
+        if response.status_code == 429:
+            raise EdgarError(
+                "EDGAR rate-limited the request (429). The client is issuing "
+                f"more than {REQUESTS_PER_SECOND}/s, or sharing an address with "
+                "something that is."
+            )
         if response.status_code != 200:
             raise EdgarError(f"EDGAR returned {response.status_code} for {url}")
 
         text = response.text
-        if cache_path is not None:
-            cache_path.write_text(text, encoding="utf-8")
+        if cache_key:
+            self._cache.put(cache_key, text)
         return text
+
+    def _fetch_many(self, requests: list[tuple[str, str | None]]) -> list[str]:
+        """Several documents at once, in the order asked for.
+
+        Sequentially this cost one round trip each; six exhibits behind a
+        filing meant six. The token bucket still governs the rate, so this
+        overlaps the waiting rather than exceeding the budget.
+
+        Anything already cached is returned without occupying a worker, so a
+        warm filing does no I/O and starts no threads.
+        """
+        results: list[str | None] = [None] * len(requests)
+        pending: list[int] = []
+
+        for index, (_, cache_key) in enumerate(requests):
+            if cache_key:
+                cached = self._cache.get(cache_key)
+                if cached is not None:
+                    results[index] = cached
+                    continue
+            pending.append(index)
+
+        if pending:
+            workers = min(len(pending), MAX_CONCURRENT_REQUESTS)
+            if workers == 1:
+                index = pending[0]
+                url, key = requests[index]
+                results[index] = self._fetch(url, key)
+            else:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = {
+                        pool.submit(self._fetch, requests[i][0], requests[i][1]): i
+                        for i in pending
+                    }
+                    for future, index in futures.items():
+                        # Exceptions surface here, so one failed exhibit fails
+                        # the filing rather than yielding a partial statement
+                        # set that looks complete.
+                        results[index] = future.result()
+
+        return [value if value is not None else "" for value in results]
+
+    def _get_json(self, url: str, *, cache_key: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = json.loads(self._fetch(url, cache_key))
+        return payload
+
+    def _get_text(self, url: str, *, cache_key: str | None = None) -> str:
+        return self._fetch(url, cache_key)
 
     # ---- registrants ------------------------------------------------------
 
@@ -408,9 +459,24 @@ class EdgarClient:
 
     def fetch_report(self, filing: Filing, report: ReportRef) -> str:
         """The raw HTML of one rendered exhibit."""
-        return self._get_text(
+        url, cache_key = self._report_request(filing, report)
+        return self._get_text(url, cache_key=cache_key)
+
+    def fetch_reports(self, filing: Filing, reports: list[ReportRef]) -> list[str]:
+        """Several exhibits at once, in the order given.
+
+        A filing's statements are independent documents that are always wanted
+        together, which makes them the one place where concurrency is free of
+        any ordering question.
+        """
+        return self._fetch_many(
+            [self._report_request(filing, report) for report in reports]
+        )
+
+    def _report_request(self, filing: Filing, report: ReportRef) -> tuple[str, str]:
+        return (
             f"{filing.base_url}/{report.filename}",
-            cache_key=f"report_{filing.accession_nodash}_{report.filename}",
+            f"report_{filing.accession_nodash}_{report.filename}",
         )
 
     def observations(self, registrant: Registrant) -> list[XbrlObservation]:

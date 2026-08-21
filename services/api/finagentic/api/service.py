@@ -207,5 +207,15 @@ class AsFiledService:
     def statement(self, filing: Filing, report: ReportRef) -> AsFiledStatement:
         return parse_statement(self._client.fetch_report(filing, report))
 
+    def statements(self, filing: Filing, reports: list[ReportRef]) -> list[AsFiledStatement]:
+        """Every requested exhibit, fetched together.
+
+        The exhibits behind one filing are always wanted as a set, and each was
+        costing a round trip of its own. Fetching them concurrently is what
+        turns opening a filing from seconds into a moment; parsing stays serial
+        because it is microseconds and holds the GIL anyway.
+        """
+        return [parse_statement(html) for html in self._client.fetch_reports(filing, reports)]
+
 
 __all__ = ["AsFiledService", "EntityRecord", "EntityService", "UnknownTickerError"]

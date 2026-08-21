@@ -15,6 +15,13 @@ import type { FilingIndex, Registrant } from "@/lib/types";
 export type BoardActions = {
   /** Put a filing's statements on the board, or take them off again. */
   toggleFiling: (registrant: Registrant, filing: FilingIndex) => void;
+  /**
+   * Fetch a filing before it is asked for, on hover or on the list settling.
+   *
+   * Speculative and silent: a prefetch that is never used costs bandwidth, and
+   * one that fails is reported only if the reader goes on to click.
+   */
+  prefetchFiling: (registrant: Registrant, filing: FilingIndex) => void;
   /** Accessions currently on the board, so the picker can show what is open. */
   openAccessions: ReadonlySet<string>;
   /** Accessions being fetched, so a slow filing does not look like a dead click. */

@@ -26,6 +26,7 @@ import {
 } from "@/lib/nodeSize";
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
+import { filingKey, RequestCache } from "@/lib/prefetch";
 import { frame } from "@/lib/viewport";
 
 type BoardNode = EntityNodeType | StatementNodeType;
@@ -234,6 +235,24 @@ function BoardInner() {
   const [openAccessions, setOpenAccessions] = useState<ReadonlySet<string>>(new Set());
   const [pendingAccessions, setPendingAccessions] = useState<ReadonlySet<string>>(new Set());
 
+  // Filings already fetched or being fetched. Held for the life of the board
+  // rather than per node, so closing a filing and reopening it costs nothing
+  // and a hover that precedes a click is not wasted.
+  const filings = useRef(new RequestCache<AsFiledStatement[]>());
+
+  /**
+   * Fetch a filing ahead of the click.
+   *
+   * A filing is immutable once submitted and the request is a plain GET of
+   * public data, so speculating costs bandwidth and nothing else. Failures are
+   * swallowed here and surfaced only if the reader actually clicks.
+   */
+  const prefetchFiling = useCallback((registrant: Registrant, filing: FilingIndex) => {
+    filings.current.warm(filingKey(registrant.cik, filing.form, filing.accession), (signal) =>
+      api.asFiled(registrant.cik, filing.form, filing.accession, signal),
+    );
+  }, []);
+
   /** Put a filing's statements on the board, or take them off again. */
   const toggleFiling = useCallback(
     (registrant: Registrant, filing: FilingIndex) => {
@@ -260,7 +279,10 @@ function BoardInner() {
 
       void (async () => {
         try {
-          const statements = await api.asFiled(registrant.cik, filing.form, accession);
+          const statements = await filings.current.fetch(
+            filingKey(registrant.cik, filing.form, accession),
+            (signal) => api.asFiled(registrant.cik, filing.form, accession, signal),
+          );
           const origin = origins.current.get(registrant.cik) ?? 0;
           const taken = rowCounts.current.get(registrant.cik) ?? 0;
           const row = statementRow(registrant, statements, {
@@ -296,8 +318,8 @@ function BoardInner() {
   );
 
   const actions = useMemo<BoardActions>(
-    () => ({ toggleFiling, openAccessions, pendingAccessions }),
-    [toggleFiling, openAccessions, pendingAccessions],
+    () => ({ toggleFiling, prefetchFiling, openAccessions, pendingAccessions }),
+    [toggleFiling, prefetchFiling, openAccessions, pendingAccessions],
   );
 
   /**
