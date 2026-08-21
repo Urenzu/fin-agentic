@@ -11,6 +11,7 @@ import {
   type Node,
 } from "@xyflow/react";
 
+import { useBoardActions } from "../BoardActions";
 import { NodeFrame } from "../NodeFrame";
 import { columnGroups, needsGroupRow } from "@/lib/columns";
 import { abbreviate, formatValue, scaleExponent } from "@/lib/decimal";
@@ -67,6 +68,7 @@ function isShareCount(element: string | null): boolean {
 export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>) {
   const { statement, company, ticker } = data;
   const { setNodes } = useReactFlow();
+  const { removeNode } = useBoardActions();
   const scroller = useRef<HTMLDivElement>(null);
 
   // The node's live height, which a resize changes. The level-of-detail
@@ -138,6 +140,8 @@ export function StatementNode({ id, data, height }: NodeProps<StatementNodeType>
         title={<span title={statement.short_name}>{statementTitle(statement.short_name)}</span>}
         scale={summarised ? scale : 1}
         onDoubleClick={toggleFit}
+        onRemove={() => removeNode(id)}
+        removeLabel="Take this statement off the board"
         meta={
           <span className="tnum">
             {statement.form} &middot; filed {filed} &middot; {unitsCaption(monetaryExp)}

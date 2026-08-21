@@ -30,6 +30,7 @@ import {
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
 import { filingKey, RequestCache } from "@/lib/prefetch";
+import { removeFromBoard } from "@/lib/removal";
 import { frame } from "@/lib/viewport";
 
 type BoardNode = EntityNodeType | StatementNodeType | ComparisonNodeType;
@@ -333,9 +334,11 @@ function BoardInner() {
       const entities = current.filter((node): node is EntityNodeType => node.type === "entity");
       if (entities.length < 2) return current;
 
-      const registrants = entities.map((node) => node.data.entity.registrant);
-      const tickers = registrants.map((r) => r.ticker).filter((t) => t !== "");
-      if (tickers.length < 2) return current;
+      const companies = entities
+        .map((node) => node.data.entity.registrant)
+        .filter((r) => r.ticker !== "")
+        .map((r) => ({ cik: r.cik, ticker: r.ticker }));
+      if (companies.length < 2) return current;
 
       // Left of the entity column and vertically centred on it, so it reads as
       // a summary of the board rather than as another company on it.
@@ -343,7 +346,7 @@ function BoardInner() {
       const bottom = Math.max(
         ...entities.map((node) => node.position.y + (node.height ?? ENTITY_NODE_HEIGHT)),
       );
-      const width = comparisonNodeWidth(tickers.length);
+      const width = comparisonNodeWidth(companies.length);
 
       const node: ComparisonNodeType = {
         id: "comparison",
@@ -354,7 +357,7 @@ function BoardInner() {
         },
         width,
         height: COMPARISON_NODE_HEIGHT,
-        data: { tickers, ciks: registrants.map((r) => r.cik), form: "10-K" },
+        data: { companies, form: "10-K" },
         dragHandle: ".drag-handle",
       };
 
@@ -372,9 +375,35 @@ function BoardInner() {
     [nodes],
   );
 
+  /**
+   * Take a panel off the board, along with anything that depended on it.
+   *
+   * The cascade lives in `lib/removal.ts`; what belongs here is the part the
+   * board owns -- a filing whose last panel has gone is no longer open, so the
+   * picker has to stop marking it. Leaving it marked gives the reader a row
+   * that looks active and does nothing when clicked, because the board already
+   * thinks it opened it.
+   */
+  const removeNode = useCallback(
+    (id: string) => {
+      setNodes((current) => {
+        const { nodes: kept, closedAccessions } = removeFromBoard(current, id);
+        if (closedAccessions.length > 0) {
+          setOpenAccessions((open) => {
+            const next = new Set(open);
+            for (const accession of closedAccessions) next.delete(accession);
+            return next;
+          });
+        }
+        return kept;
+      });
+    },
+    [setNodes],
+  );
+
   const actions = useMemo<BoardActions>(
-    () => ({ toggleFiling, prefetchFiling, openAccessions, pendingAccessions }),
-    [toggleFiling, prefetchFiling, openAccessions, pendingAccessions],
+    () => ({ toggleFiling, prefetchFiling, removeNode, openAccessions, pendingAccessions }),
+    [toggleFiling, prefetchFiling, removeNode, openAccessions, pendingAccessions],
   );
 
   /**
@@ -404,9 +433,9 @@ function BoardInner() {
         // A comparison draws from several companies at once, so it gets an
         // edge from each -- which is also what shows at a glance who is in it.
         if (node.type === "comparison") {
-          return node.data.ciks.map((cik) => ({
-            id: `edge-${node.id}-${cik}`,
-            source: `entity-${cik}`,
+          return node.data.companies.map((company) => ({
+            id: `edge-${node.id}-${company.cik}`,
+            source: `entity-${company.cik}`,
             target: node.id,
             animated: false,
           }));
@@ -427,6 +456,12 @@ function BoardInner() {
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
+          // React Flow would drop the node and leave the rest of the cascade
+          // undone, so removal goes through the one handler that knows what
+          // else depended on it.
+          onNodesDelete={(deleted) => {
+            for (const node of deleted) removeNode(node.id);
+          }}
           nodeTypes={nodeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
           nodesConnectable={false}

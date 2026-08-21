@@ -2,6 +2,7 @@
 
 import { Handle, NodeResizer, Position, useStore, type NodeProps, type Node } from "@xyflow/react";
 
+import { useBoardActions } from "../BoardActions";
 import { FilingPicker } from "../FilingPicker";
 import { NodeFrame } from "../NodeFrame";
 import { fitScale, tierFor } from "@/lib/lod";
@@ -34,8 +35,9 @@ const STATE_STYLES: Record<Entity["state"], string> = {
   error: "border-negative/40 text-negative",
 };
 
-export function EntityNode({ data, height: live }: NodeProps<EntityNodeType>) {
+export function EntityNode({ id, data, height: live }: NodeProps<EntityNodeType>) {
   const { entity } = data;
+  const { removeNode } = useBoardActions();
   const { registrant, coverage, shape } = entity;
 
   const height = live ?? ENTITY_NODE_HEIGHT;
@@ -83,6 +85,10 @@ export function EntityNode({ data, height: live }: NodeProps<EntityNodeType>) {
         eyebrow={`CIK ${registrant.cik}`}
         title={registrant.name}
         scale={summarised ? scale : 1}
+        onRemove={() => removeNode(id)}
+        // Says what else goes, because a company card is what its
+        // statements were opened from.
+        removeLabel="Remove this company and its open statements"
         meta={registrant.ticker || undefined}
         action={
           <span

@@ -26,6 +26,13 @@ export type BoardActions = {
   openAccessions: ReadonlySet<string>;
   /** Accessions being fetched, so a slow filing does not look like a dead click. */
   pendingAccessions: ReadonlySet<string>;
+  /**
+   * Take a panel off the board, along with anything that depended on it.
+   *
+   * Removing a company also removes its statements and its column in any
+   * comparison -- see lib/removal.ts, where that judgement lives.
+   */
+  removeNode: (id: string) => void;
 };
 
 const BoardActionsContext = createContext<BoardActions | null>(null);

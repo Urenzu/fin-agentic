@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Handle, NodeResizer, Position, useStore, type Node, type NodeProps } from "@xyflow/react";
 
+import { useBoardActions } from "../BoardActions";
 import { NodeFrame } from "../NodeFrame";
 import { api, ApiError } from "@/lib/api";
 import { ABSENT, buildRows, cellProvenance, periodCaption } from "@/lib/comparison";
@@ -17,16 +18,22 @@ import {
 import type { Comparison } from "@/lib/types";
 
 export type ComparisonNodeData = {
-  tickers: string[];
-  /** The companies this was built from, so the board can draw an edge to each. */
-  ciks: number[];
+  /**
+   * The companies being compared, kept as pairs rather than as parallel
+   * arrays of tickers and CIKs. Removing a company has to drop both together,
+   * and two arrays kept in step by index is exactly how a column ends up
+   * labelled with one company and filled with another's figures.
+   */
+  companies: { cik: number; ticker: string }[];
   form: string;
 };
 
 export type ComparisonNodeType = Node<ComparisonNodeData, "comparison">;
 
-export function ComparisonNode({ data, height }: NodeProps<ComparisonNodeType>) {
-  const { tickers, form } = data;
+export function ComparisonNode({ id, data, height }: NodeProps<ComparisonNodeType>) {
+  const { companies, form } = data;
+  const { removeNode } = useBoardActions();
+  const tickers = companies.map((company) => company.ticker);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,6 +72,8 @@ export function ComparisonNode({ data, height }: NodeProps<ComparisonNodeType>) 
         eyebrow="Comparison"
         title={tickers.join("  ·  ")}
         scale={summarised ? scale : 1}
+        onRemove={() => removeNode(id)}
+        removeLabel="Take this comparison off the board"
         meta={<span className="tnum">{form} &middot; each company&rsquo;s most recent filing</span>}
       >
         {summarised ? (
