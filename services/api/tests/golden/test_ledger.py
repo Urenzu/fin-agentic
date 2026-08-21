@@ -272,32 +272,6 @@ def test_comprehensive_income_reconciles_on_a_real_filer(apple):
     assert not [r for r in results if r.status is CheckStatus.FAILED]
 
 
-def test_the_equity_rollforward_is_registered_but_mostly_cannot_run(apple):
-    """Documents a data limitation, so it is not mistaken for a working check.
-
-    The roll-forward is the widest identity here -- two balance sheets, the
-    income statement and the comprehensive income statement at once -- and it
-    is correct and tested against synthetic ledgers. On real filers it almost
-    always skips, because its inputs are not published: `companyfacts` carries
-    no consolidated `StockIssuedDuringPeriodValueNewIssues` at all for Apple,
-    Microsoft, Coca-Cola or JPMorgan. Those lines exist only on the rendered
-    equity statement, which the as-filed path reads and the ledger does not.
-
-    Closing that gap means ingesting exhibits into the ledger, which is its own
-    piece of work. Until then this asserts the honest state: the check runs,
-    declines to evaluate, and names what it wanted.
-    """
-    results = [r for r in apple.validation.results if r.check_id == "eq.rollforward"]
-    assert results, "the roll-forward is not registered"
-    assert not [r for r in results if r.status is CheckStatus.FAILED], (
-        "skipping is expected; failing is not"
-    )
-
-    skipped = [r for r in results if r.status is CheckStatus.SKIPPED]
-    assert skipped, "expected the roll-forward to be skipping on companyfacts data"
-    assert any(r.missing for r in skipped), "a skip must name what it wanted"
-
-
 def test_the_captured_facts_are_not_stale(apple, tesla):
     """A fixture trimmed to the tag map goes stale the moment the map grows.
 
@@ -319,7 +293,6 @@ def test_the_captured_facts_are_not_stale(apple, tesla):
         Concept.NET_INCOME,
         Concept.COMPREHENSIVE_INCOME,
         Concept.OTHER_COMPREHENSIVE_INCOME,
-        Concept.OCI_FOREIGN_CURRENCY,
     )
     for record in (apple, tesla):
         present = {f.concept for f in record.facts}

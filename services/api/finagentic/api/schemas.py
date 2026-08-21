@@ -215,6 +215,85 @@ class AsFiledStatementOut(BaseModel):
     source_url: str
 
 
+class MetricValueOut(BaseModel):
+    """One comparable figure, for one period of one filing."""
+
+    metric: str
+    label: str
+    value: str
+    #: The us-gaap element this came from. Two filers report the same metric
+    #: under different names, which is the reason the mapping exists, so which
+    #: line was used stays visible rather than being taken on trust.
+    element: str
+    period_label: str
+    period_end: str | None = None
+    duration: str | None = None
+
+
+class CompanyMetricsOut(BaseModel):
+    """One company's figures from one filing."""
+
+    registrant: RegistrantOut
+    accession: str
+    form: str
+    filed: str
+    period_end: str | None = None
+    #: Keyed by metric, newest period first.
+    metrics: dict[str, tuple[MetricValueOut, ...]]
+    #: Metrics this filer does not report. Costco prints no gross profit and
+    #: Coca-Cola no total liabilities; both are the filer's choice, and naming
+    #: them is more use than an empty cell the reader has to interpret.
+    absent: tuple[str, ...] = ()
+
+
+class ComparisonOut(BaseModel):
+    """Several companies' headline figures, side by side."""
+
+    companies: tuple[CompanyMetricsOut, ...]
+    #: Every metric in the vocabulary, in display order, so a client renders
+    #: the same rows whether or not a given filer reports them.
+    metrics: tuple[dict[str, str], ...]
+
+
+class BrokenRelationshipOut(BaseModel):
+    """A relationship the filer published that does not hold."""
+
+    total: str
+    period_end: str
+    period_start: str | None = None
+    expected: str
+    actual: str
+    delta: str
+    components: int
+
+
+class ReconciliationOut(BaseModel):
+    """A filing checked against the arithmetic its own filer published.
+
+    The denominator belongs to the filer: `evaluated` counts the relationships
+    they stated in this filing's calculation linkbase, not a share of anything
+    we defined. Counts rather than a percentage -- all 12 relationships holding
+    is not the assurance that all 213 is, and a percentage hides that.
+    """
+
+    accession: str
+    form: str
+    held: int
+    evaluated: int
+    #: Relationships whose terms this filing does not report as consolidated
+    #: figures, typically note disclosures carrying dimensional breakdowns.
+    unevaluated: int
+    #: The filer published no calculation linkbase. Nothing was checked, which
+    #: is not the same as everything checking out.
+    no_linkbase: bool
+    #: EDGAR has not published this filing's XBRL facts yet. The statements
+    #: render regardless; the arithmetic cannot be checked until they appear.
+    facts_pending: bool
+    is_clean: bool
+    summary: str
+    broken: tuple[BrokenRelationshipOut, ...] = ()
+
+
 class AsFiledIndexOut(BaseModel):
     """Which statements a filing contains."""
 

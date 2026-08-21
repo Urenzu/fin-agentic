@@ -150,21 +150,7 @@ TAG_TO_CONCEPT: dict[str, Concept] = {
     # adding a mezzanine component to a mezzanine total would.
     "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent": Concept.OTHER_COMPREHENSIVE_INCOME,
     "OtherComprehensiveIncomeLossNetOfTax": Concept.OTHER_COMPREHENSIVE_INCOME,
-    "OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax": Concept.OCI_FOREIGN_CURRENCY,
-    "OtherComprehensiveIncomeLossCashFlowHedgeGainLossAfterReclassificationAndTax": Concept.OCI_DERIVATIVES,
-    "OtherComprehensiveIncomeLossAvailableForSaleSecuritiesAdjustmentNetOfTax": Concept.OCI_SECURITIES,
-    "OtherComprehensiveIncomeLossPensionAndOtherPostretirementBenefitPlansAdjustmentNetOfTax": Concept.OCI_PENSION,
     "ComprehensiveIncomeNetOfTax": Concept.COMPREHENSIVE_INCOME,
-    # ---- equity roll-forward ----------------------------------------------
-    "StockIssuedDuringPeriodValueNewIssues": Concept.STOCK_ISSUED,
-    "StockRepurchasedAndRetiredDuringPeriodValue": Concept.STOCK_REPURCHASED,
-    "StockRepurchasedDuringPeriodValue": Concept.STOCK_REPURCHASED,
-    "AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue": Concept.SHARE_BASED_COMP_EQUITY,
-    "AdjustmentsRelatedToTaxWithholdingForShareBasedCompensation": Concept.TAX_WITHHOLDING_SHARE_BASED,
-    "Dividends": Concept.DIVIDENDS_DECLARED,
-    "DividendsCommonStockCash": Concept.DIVIDENDS_DECLARED,
-    "DividendsCash": Concept.DIVIDENDS_DECLARED,
-    "CommonStockDividendsPerShareDeclared": Concept.DIVIDENDS_PER_SHARE,
     # ---- operating cash flow ---------------------------------------------
     "DepreciationDepletionAndAmortization": Concept.DEPRECIATION_AND_AMORTIZATION,
     "DepreciationAmortizationAndAccretionNet": Concept.DEPRECIATION_AND_AMORTIZATION,
@@ -235,17 +221,6 @@ TAG_PRECEDENCE: dict[Concept, tuple[str, ...]] = {
     Concept.OTHER_COMPREHENSIVE_INCOME: (
         "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent",
         "OtherComprehensiveIncomeLossNetOfTax",
-    ),
-    # An aggregate dividend line beats the common-stock-only one: a filer with
-    # preferred shares prints both, and the roll-forward wants the total.
-    Concept.DIVIDENDS_DECLARED: (
-        "Dividends",
-        "DividendsCommonStockCash",
-        "DividendsCash",
-    ),
-    Concept.STOCK_REPURCHASED: (
-        "StockRepurchasedAndRetiredDuringPeriodValue",
-        "StockRepurchasedDuringPeriodValue",
     ),
     Concept.OTHER_NONOPERATING_INCOME: (
         "NonoperatingIncomeExpense",

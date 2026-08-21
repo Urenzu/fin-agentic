@@ -343,9 +343,7 @@ def test_an_empty_ledger_produces_no_results():
     assert run_checks(FactSet()).results == ()
 
 
-def test_every_registered_check_emits_a_result_for_some_input(
-    clean_filing, two_year_filing, fy2024
-):
+def test_every_registered_check_emits_a_result_for_some_input(clean_filing, fy2024):
     """No check may be dead code.
 
     Each registered check must produce a result on at least one of the inputs
@@ -357,7 +355,7 @@ def test_every_registered_check_emits_a_result_for_some_input(
     with_conflict = FactSet([*clean_filing, make_fact(Concept.NET_INCOME, fy2024, Decimal("1700"))])
 
     ran: set[str] = set()
-    for ledger in (clean_filing, two_year_filing, quarterly, with_conflict):
+    for ledger in (clean_filing, quarterly, with_conflict):
         ran |= {r.check_id for r in run_checks(ledger).results}
 
     registered = {
@@ -366,7 +364,7 @@ def test_every_registered_check_emits_a_result_for_some_input(
         "is.opex_subtotal", "is.operating_income", "is.net_income", "is.eps",
         "cf.rollforward", "cf.net_change", "xs.cash_tie", "xs.net_income_tie",
         "period.arithmetic", "bs.assets_tie",
-        "ci.total", "ci.components", "eq.rollforward",
+        "ci.total",
     }
     assert len(registered) == len(ALL_CHECKS), (
         "ALL_CHECKS changed; update the expected check-id set in this test"
@@ -588,125 +586,3 @@ def test_a_wrong_oci_total_breaks_comprehensive_income(clean_filing, fy2024):
     broken = _replace_value(clean_filing, Concept.OTHER_COMPREHENSIVE_INCOME, fy2024, "120")
     statuses = _statuses(run_checks(broken), "ci.total")
     assert CheckStatus.FAILED in statuses
-
-
-def test_oci_categories_sum_to_their_total(clean_filing):
-    assert _statuses(run_checks(clean_filing), "ci.components") == {CheckStatus.PASSED}
-
-
-def test_an_oci_residual_is_reported_without_being_called_a_break(clean_filing, fy2024):
-    """This check reports; it does not adjudicate.
-
-    US GAAP's list of OCI categories is open -- pension adjustments, equity
-    method investee share, others besides the four carried here -- so a
-    residual is the size of what is unmodelled, not evidence that a filer's
-    arithmetic is wrong. Coca-Cola reported 21 breaks on this check for no
-    better reason than having a pension scheme.
-
-    What the check is worth is the number in `delta`, which is why that is
-    asserted rather than the status alone.
-    """
-    broken = _replace_value(clean_filing, Concept.OCI_FOREIGN_CURRENCY, fy2024, "90")
-    statuses = _statuses(run_checks(broken), "ci.components")
-    assert statuses == {CheckStatus.SKIPPED}
-
-    result = _result(run_checks(broken), "ci.components")[0]
-    assert result.delta == Decimal("50") * 10**6
-    assert "unaccounted for" in result.message
-
-
-def test_a_missing_oci_category_is_not_a_break(clean_filing, fy2024):
-    """OCI categories are signed, unlike assets or expenses.
-
-    Dropping a negative one makes the rest sum *higher* than the total, which
-    a subtotal check reading overshoot-as-contradiction would report as an
-    accounting break. It is incomplete extraction, and must read as one.
-    """
-    without = FactSet(
-        [
-            f
-            for f in clean_filing
-            if not (f.concept is Concept.OCI_DERIVATIVES and f.period.key == fy2024.key)
-        ]
-    )
-    statuses = _statuses(run_checks(without), "ci.components")
-    assert CheckStatus.FAILED not in statuses
-
-    result = _result(run_checks(without), "ci.components")[0]
-    assert "OtherComprehensiveIncomeLossCashFlowHedgeGainLoss" in " ".join(result.missing)
-
-
-def test_the_equity_rollforward_closes(two_year_filing):
-    """5,400 + 1,600 + 50 + 200 + 150 - 900 - 400 - 100 = 6,000.
-
-    The widest identity in the system: two balance sheets, the income
-    statement and the comprehensive income statement, all at once.
-    """
-    assert _statuses(run_checks(two_year_filing), "eq.rollforward") == {CheckStatus.PASSED}
-
-
-def test_the_rollforward_catches_an_error_in_any_of_its_inputs(two_year_filing, fy2024):
-    """Its reach is the point. A wrong number anywhere it touches breaks it,
-    including in periods and statements the other checks never compare."""
-    for concept, wrong in [
-        (Concept.NET_INCOME, "1900"),
-        (Concept.OTHER_COMPREHENSIVE_INCOME, "400"),
-        (Concept.STOCK_REPURCHASED, "1500"),
-        (Concept.DIVIDENDS_DECLARED, "50"),
-        (Concept.STOCK_ISSUED, "900"),
-    ]:
-        broken = _replace_value(two_year_filing, concept, fy2024, wrong)
-        assert CheckStatus.FAILED in _statuses(run_checks(broken), "eq.rollforward"), (
-            f"a wrong {concept.value} did not break the roll-forward"
-        )
-
-
-def test_a_wrong_closing_equity_breaks_the_rollforward(two_year_filing, fy2024_instant):
-    broken = _replace_value(
-        two_year_filing, Concept.TOTAL_STOCKHOLDERS_EQUITY, fy2024_instant, "6500"
-    )
-    assert CheckStatus.FAILED in _statuses(run_checks(broken), "eq.rollforward")
-
-
-def test_a_movement_we_do_not_model_is_reported_as_unexplained(two_year_filing, fy2024):
-    """Filers move equity in ways this does not model -- conversions,
-    spin-offs, adopting a new standard. Those are events, not errors, so a
-    difference alongside a missing movement is not asserted as a break."""
-    without = FactSet(
-        [
-            f
-            for f in two_year_filing
-            if not (f.concept is Concept.DIVIDENDS_DECLARED and f.period.key == fy2024.key)
-        ]
-    )
-    statuses = _statuses(run_checks(without), "eq.rollforward")
-    assert CheckStatus.FAILED not in statuses
-
-
-def test_the_rollforward_will_not_run_on_net_income_alone(clean_filing, fy2023_instant):
-    """Equity did not change by earnings: every dividend-paying company would
-    report a break. Without a second movement the check declines to run."""
-    thin = FactSet(
-        [
-            f
-            for f in clean_filing
-            if f.concept
-            not in {
-                Concept.STOCK_ISSUED,
-                Concept.STOCK_REPURCHASED,
-                Concept.SHARE_BASED_COMP_EQUITY,
-                Concept.DIVIDENDS_DECLARED,
-                Concept.TAX_WITHHOLDING_SHARE_BASED,
-                Concept.OTHER_COMPREHENSIVE_INCOME,
-            }
-        ]
-        + [make_fact(Concept.TOTAL_STOCKHOLDERS_EQUITY, fy2023_instant, Decimal("5400"))]
-    )
-    assert _statuses(run_checks(thin), "eq.rollforward") == {CheckStatus.SKIPPED}
-
-
-def test_the_rollforward_is_a_warning_not_a_critical(two_year_filing):
-    """A break means "something moved equity we did not account for", which is
-    a weaker claim than "these numbers contradict each other"."""
-    result = _result(run_checks(two_year_filing), "eq.rollforward")[0]
-    assert result.severity is Severity.WARNING

@@ -17,6 +17,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
+from finagentic.compare.extract import FilingMetrics, metrics_for
 from finagentic.config import settings
 from finagentic.domain.ledger import FactSet
 from finagentic.ingest.edgar import (
@@ -30,6 +31,7 @@ from finagentic.ingest.edgar import (
 from finagentic.ingest.rfiles import AsFiledStatement, parse_statement
 from finagentic.ingest.shapes import ShapeAssessment, detect_shape
 from finagentic.ingest.xbrl_adapter import AdaptationReport, to_facts
+from finagentic.validation.asfiled import FilingReconciliation, reconcile
 from finagentic.validation.engine import validate
 from finagentic.validation.results import ValidationReport
 
@@ -206,6 +208,27 @@ class AsFiledService:
 
     def statement(self, filing: Filing, report: ReportRef) -> AsFiledStatement:
         return parse_statement(self._client.fetch_report(filing, report))
+
+    def reconciliation(self, registrant: Registrant, filing: Filing) -> FilingReconciliation:
+        """Check a filing against the arithmetic its own filer published.
+
+        Per filing and self-contained: no concept vocabulary, no matching
+        across companies or periods. The denominator belongs to the filer.
+        """
+        return reconcile(
+            self._client.observations(registrant),
+            self._client.calculation_linkbase(filing),
+            filing.accession,
+        )
+
+    def metrics(self, filing: Filing) -> FilingMetrics:
+        """The twelve comparable figures this filing reports.
+
+        Read from the rendered statements, so a filing whose XBRL facts EDGAR
+        has not published yet still compares.
+        """
+        reports = self.statement_index(filing)
+        return metrics_for(self.statements(filing, reports), filing.accession, filing.form)
 
     def statements(self, filing: Filing, reports: list[ReportRef]) -> list[AsFiledStatement]:
         """Every requested exhibit, fetched together.

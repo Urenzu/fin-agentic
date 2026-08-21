@@ -195,25 +195,10 @@ CASH_FLOW_DURATION: dict[Concept, str] = {
 
 #: Cash flow concepts that are instants, keyed to the statement's period end.
 #: Comprehensive income, in millions. Internally consistent:
-#:   other comprehensive income = 40 - 15 + 25   = 50
-#:   comprehensive income       = 1,600 + 50     = 1,650
+#:   comprehensive income = 1,600 + 50 = 1,650
 COMPREHENSIVE_INCOME: dict[Concept, str] = {
-    Concept.OCI_FOREIGN_CURRENCY: "40",
-    Concept.OCI_DERIVATIVES: "(15)",
-    Concept.OCI_SECURITIES: "25",
     Concept.OTHER_COMPREHENSIVE_INCOME: "50",
     Concept.COMPREHENSIVE_INCOME: "1650",
-}
-
-#: What moved equity over the year, in millions. Stored as magnitudes: the
-#: direction belongs to the identity, not to the value.
-#:   5,400 + 1,600 + 50 + 200 + 150 - 900 - 400 - 100 = 6,000
-EQUITY_MOVEMENTS: dict[Concept, str] = {
-    Concept.STOCK_ISSUED: "200",
-    Concept.SHARE_BASED_COMP_EQUITY: "150",
-    Concept.STOCK_REPURCHASED: "900",
-    Concept.DIVIDENDS_DECLARED: "400",
-    Concept.TAX_WITHHOLDING_SHARE_BASED: "100",
 }
 
 #: Equity as it stood at the start of the year, for `two_year_filing`.
@@ -253,7 +238,6 @@ def build_clean_filing(duration: Period, instant: Period) -> FactSet:
         **INCOME_STATEMENT,
         **CASH_FLOW_DURATION,
         **COMPREHENSIVE_INCOME,
-        **EQUITY_MOVEMENTS,
     }.items():
         facts.append(make_fact(concept, duration, _parse(raw)))
 

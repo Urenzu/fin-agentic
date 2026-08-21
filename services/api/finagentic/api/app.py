@@ -27,6 +27,7 @@ from finagentic.api.service import (
     EntityService,
     UnknownTickerError,
 )
+from finagentic.compare.metrics import LABELS, Metric, is_instant
 from finagentic.config import settings
 from finagentic.domain.concepts import Statement, meta
 from finagentic.domain.facts import XbrlProvenance
@@ -53,6 +54,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+#: Comparing more than a handful at once is a screening query, which this
+#: endpoint is not, and each company costs a filing fetch.
+MAX_COMPARISON = 6
 
 _service = EntityService()
 _as_filed_service = AsFiledService(_service._client)
@@ -408,6 +413,122 @@ def list_filings(
         )
     except EdgarError as exc:
         raise HTTPException(502, str(exc)) from exc
+
+
+@app.get("/compare", response_model=s.ComparisonOut)
+def compare(
+    tickers: str = Query(description="Comma-separated, e.g. AAPL,MSFT,NVDA"),
+    form: str = Query("10-K"),
+    service: EntityService = Depends(get_service),
+    as_filed: AsFiledService = Depends(get_as_filed_service),
+) -> s.ComparisonOut:
+    """Headline figures for several companies, from each one's latest filing.
+
+    The only place in this system that decides two companies' lines correspond.
+    Everything else is per filing and needs no such judgement; comparison
+    cannot avoid it, so it is confined here and kept to twelve metrics whose
+    aliases are few and whose errors are visible.
+    """
+    wanted = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not wanted:
+        raise HTTPException(400, "Give at least one ticker.")
+    if len(wanted) > MAX_COMPARISON:
+        raise HTTPException(
+            400, f"At most {MAX_COMPARISON} companies at once; asked for {len(wanted)}."
+        )
+
+    companies: list[s.CompanyMetricsOut] = []
+    for ticker in wanted:
+        try:
+            registrant = service.resolve(ticker)
+            filing = as_filed.latest_filing(registrant, form)
+            if filing is None:
+                raise HTTPException(404, f"{ticker} has no {form} on EDGAR.")
+            found = as_filed.metrics(filing)
+        except UnknownTickerError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except EdgarError as exc:
+            raise HTTPException(502, str(exc)) from exc
+
+        companies.append(
+            s.CompanyMetricsOut(
+                registrant=_registrant_out(registrant),
+                accession=filing.accession,
+                form=filing.form,
+                filed=filing.filed.isoformat(),
+                period_end=filing.period_end.isoformat() if filing.period_end else None,
+                metrics={
+                    metric.value: tuple(
+                        s.MetricValueOut(
+                            metric=p.metric.value,
+                            label=LABELS[p.metric],
+                            value=format(p.value, "f"),
+                            element=p.element,
+                            period_label=p.label,
+                            period_end=p.end_date.isoformat() if p.end_date else None,
+                            duration=p.duration,
+                        )
+                        for p in periods
+                    )
+                    for metric, periods in found.periods.items()
+                },
+                absent=tuple(m.value for m in Metric if m not in found.periods),
+            )
+        )
+
+    return s.ComparisonOut(
+        companies=tuple(companies),
+        metrics=tuple(
+            {"metric": m.value, "label": LABELS[m], "kind": "instant" if is_instant(m) else "duration"}
+            for m in Metric
+        ),
+    )
+
+
+@app.get("/entities/{cik}/reconciliation", response_model=s.ReconciliationOut)
+def get_reconciliation(
+    cik: int,
+    form: str = Query("10-K"),
+    accession: str | None = Query(None, description="Defaults to the most recent filing"),
+    service: EntityService = Depends(get_service),
+    as_filed: AsFiledService = Depends(get_as_filed_service),
+) -> s.ReconciliationOut:
+    """Check one filing against the arithmetic its own filer published.
+
+    Self-contained: no concept vocabulary, no comparison across companies or
+    periods. Whether a filing agrees with itself is a question the filing can
+    answer on its own, and the calculation linkbase is the filer saying how.
+    """
+    registrant = _resolve_registrant(service, cik)
+    try:
+        filing = _latest_filing(as_filed, registrant, form, accession)
+        result = as_filed.reconciliation(registrant, filing)
+    except EdgarError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    return s.ReconciliationOut(
+        accession=filing.accession,
+        form=filing.form,
+        held=result.held,
+        evaluated=result.evaluated,
+        unevaluated=len(result.unevaluated),
+        no_linkbase=result.no_linkbase,
+        facts_pending=result.facts_pending,
+        is_clean=result.is_clean,
+        summary=result.summary,
+        broken=tuple(
+            s.BrokenRelationshipOut(
+                total=r.total_element,
+                period_end=r.period_end.isoformat(),
+                period_start=r.period_start.isoformat() if r.period_start else None,
+                expected=format(r.expected, "f"),
+                actual=format(r.actual, "f"),
+                delta=format(r.delta, "f"),
+                components=r.components,
+            )
+            for r in result.broken
+        ),
+    )
 
 
 @app.get("/entities/{cik}/as-filed", response_model=tuple[s.AsFiledStatementOut, ...])

@@ -29,6 +29,11 @@ from typing import Any
 
 import httpx
 
+from finagentic.ingest.linkbase import (
+    Relationship,
+    calculation_filename,
+    parse_calculation_linkbase,
+)
 from finagentic.ingest.ratelimit import TokenBucket
 from finagentic.store.cache import BlobCache, NullCache, build_cache
 
@@ -456,6 +461,30 @@ class EdgarClient:
             cache_key=f"filingsummary_{filing.accession_nodash}",
         )
         return parse_filing_summary(xml)
+
+    def calculation_linkbase(self, filing: Filing) -> list[Relationship]:
+        """The arithmetic the filer published with this filing.
+
+        The linkbase is named in `FilingSummary.xml`, which is already fetched
+        to find the exhibits, so discovering it costs no extra round trip --
+        and both are cached, so a filing already on the board reads from
+        memory.
+        """
+        summary = self._get_text(
+            f"{filing.base_url}/FilingSummary.xml",
+            cache_key=f"filingsummary_{filing.accession_nodash}",
+        )
+        filename = calculation_filename(summary)
+        if filename is None:
+            # Older filings, and a few small ones, ship no calculation
+            # linkbase. Nothing to check is not a failure to check.
+            return []
+
+        xml = self._get_text(
+            f"{filing.base_url}/{filename}",
+            cache_key=f"calculation_{filing.accession_nodash}",
+        )
+        return parse_calculation_linkbase(xml)
 
     def fetch_report(self, filing: Filing, report: ReportRef) -> str:
         """The raw HTML of one rendered exhibit."""
