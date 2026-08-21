@@ -123,3 +123,46 @@ export type Validation = {
   is_clean: boolean;
   results: ValidationResult[];
 };
+
+export type MetricValue = {
+  metric: string;
+  label: string;
+  /** Full scale, as a decimal string. Never a JSON number. */
+  value: string;
+  /**
+   * The us-gaap element this came from. Two filers reporting the same metric
+   * under different names is why the mapping exists, so which line was used
+   * stays inspectable.
+   */
+  element: string;
+  period_label: string;
+  period_end: string | null;
+  duration: string | null;
+};
+
+export type MetricDescriptor = {
+  metric: string;
+  label: string;
+  /** "instant" for a balance, "duration" for a flow. */
+  kind: string;
+  /** "USD", "shares" or "USD/share". */
+  unit: string;
+};
+
+export type CompanyMetrics = {
+  registrant: Registrant;
+  accession: string;
+  form: string;
+  filed: string;
+  period_end: string | null;
+  /** Keyed by metric, newest period first. */
+  metrics: Record<string, MetricValue[] | undefined>;
+  /** Metrics this filer does not report. The filer's choice, not a gap. */
+  absent: string[];
+};
+
+export type Comparison = {
+  companies: CompanyMetrics[];
+  /** Every metric in display order, so the table keeps its shape. */
+  metrics: MetricDescriptor[];
+};

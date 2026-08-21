@@ -109,3 +109,40 @@ export function clampSize(value: number, min: number, max = Number.MAX_SAFE_INTE
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
+
+/**
+ * A comparison panel's width, which is the one node that grows with its
+ * contents: a column per company being compared.
+ *
+ * Deliberately not the fixed cell the statements use. Those are placed on a
+ * grid so filings line up between rows; a comparison sits on its own and has
+ * nothing to line up with, and forcing three companies into a five-column
+ * width would leave a band of empty panel doing nothing.
+ */
+export function comparisonNodeWidth(companies: number): number {
+  return LABEL_COLUMN + Math.max(companies, 1) * VALUE_COLUMN + 32;
+}
+
+/**
+ * The height a comparison opens at.
+ *
+ * Every metric gets a row whether or not a company reports it, so the height
+ * is known exactly rather than estimated: the table is always twelve rows.
+ * Its column header runs to two lines -- ticker above period -- so it needs
+ * more than a statement's single-line one.
+ */
+//: The parts below are measured from the rendered panel rather than estimated.
+//: The statement constants do not fit it: a comparison's header runs to three
+//: lines where a statement's runs to two, and its rows are taller because each
+//: column header carries a ticker above a period. Guessing left the twelfth
+//: metric permanently below the fold, which is the one row a reader would
+//: never think to scroll for.
+export const COMPARISON_HEADER_HEIGHT = 82;
+export const COMPARISON_COLUMN_HEADER_HEIGHT = 46;
+export const COMPARISON_ROW_HEIGHT = 29;
+export const COMPARISON_METRIC_COUNT = 12;
+export const COMPARISON_NODE_HEIGHT =
+  COMPARISON_HEADER_HEIGHT +
+  COMPARISON_COLUMN_HEADER_HEIGHT +
+  COMPARISON_ROW_HEIGHT * COMPARISON_METRIC_COUNT +
+  8;

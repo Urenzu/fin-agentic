@@ -67,6 +67,21 @@ LABELS: dict[Metric, str] = {
     Metric.EPS_DILUTED: "Diluted EPS",
 }
 
+#: What each metric is counted in. Sent with the comparison so a client
+#: formats by what a figure *is* rather than by guessing from its magnitude --
+#: 15,004,730,000 shares and $15bn are indistinguishable otherwise, and diluted
+#: EPS of 7.46 abbreviated as "7B" would be absurd.
+UNITS: dict[Metric, str] = {
+    Metric.SHARES_DILUTED: "shares",
+    Metric.EPS_DILUTED: "USD/share",
+}
+
+
+def unit(metric: Metric) -> str:
+    """The unit for `metric`. Money unless stated otherwise."""
+    return UNITS.get(metric, "USD")
+
+
 #: Balance sheet metrics are measured at an instant; the rest over a period.
 #: A duration figure matched to an instant, or the reverse, is a category error
 #: that would otherwise surface as an inexplicable number.
@@ -144,4 +159,14 @@ def is_instant(metric: Metric) -> bool:
     return metric in INSTANT
 
 
-__all__ = ["ALIASES", "BY_ELEMENT", "INSTANT", "LABELS", "Metric", "is_instant", "rank"]
+__all__ = [
+    "ALIASES",
+    "BY_ELEMENT",
+    "INSTANT",
+    "LABELS",
+    "UNITS",
+    "Metric",
+    "is_instant",
+    "rank",
+    "unit",
+]

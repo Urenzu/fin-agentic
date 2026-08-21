@@ -1,4 +1,11 @@
-import type { AsFiledStatement, Entity, FilingIndex, Registrant, Validation } from "./types";
+import type {
+  AsFiledStatement,
+  Comparison,
+  Entity,
+  FilingIndex,
+  Registrant,
+  Validation,
+} from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -80,6 +87,13 @@ export const api = {
   asFiled: (cik: number, form = "10-K", accession?: string, signal?: AbortSignal) =>
     request<AsFiledStatement[]>(`/entities/${cik}/as-filed`, {
       params: { form, accession },
+      signal,
+    }),
+
+  /** Headline figures for several companies, from each one's latest filing. */
+  compare: (tickers: string[], form = "10-K", signal?: AbortSignal) =>
+    request<Comparison>("/compare", {
+      params: { tickers: tickers.join(","), form },
       signal,
     }),
 

@@ -27,7 +27,7 @@ from finagentic.api.service import (
     EntityService,
     UnknownTickerError,
 )
-from finagentic.compare.metrics import LABELS, Metric, is_instant
+from finagentic.compare.metrics import LABELS, Metric, is_instant, unit
 from finagentic.config import settings
 from finagentic.domain.concepts import Statement, meta
 from finagentic.domain.facts import XbrlProvenance
@@ -479,7 +479,12 @@ def compare(
     return s.ComparisonOut(
         companies=tuple(companies),
         metrics=tuple(
-            {"metric": m.value, "label": LABELS[m], "kind": "instant" if is_instant(m) else "duration"}
+            s.MetricDescriptorOut(
+                metric=m.value,
+                label=LABELS[m],
+                kind="instant" if is_instant(m) else "duration",
+                unit=unit(m),
+            )
             for m in Metric
         ),
     )

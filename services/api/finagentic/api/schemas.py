@@ -246,13 +246,25 @@ class CompanyMetricsOut(BaseModel):
     absent: tuple[str, ...] = ()
 
 
+class MetricDescriptorOut(BaseModel):
+    """What a metric is, independent of any company reporting it."""
+
+    metric: str
+    label: str
+    #: "instant" for a balance, "duration" for a flow.
+    kind: str
+    #: "USD", "shares" or "USD/share". Sent so a client formats by what a
+    #: figure is rather than guessing from its size.
+    unit: str
+
+
 class ComparisonOut(BaseModel):
     """Several companies' headline figures, side by side."""
 
     companies: tuple[CompanyMetricsOut, ...]
     #: Every metric in the vocabulary, in display order, so a client renders
     #: the same rows whether or not a given filer reports them.
-    metrics: tuple[dict[str, str], ...]
+    metrics: tuple[MetricDescriptorOut, ...]
 
 
 class BrokenRelationshipOut(BaseModel):

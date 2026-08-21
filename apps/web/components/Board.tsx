@@ -16,9 +16,12 @@ import {
 
 import { BoardActionsProvider, type BoardActions } from "./BoardActions";
 import { TickerSearch } from "./TickerSearch";
+import { ComparisonNode, type ComparisonNodeType } from "./nodes/ComparisonNode";
 import { EntityNode, type EntityNodeType } from "./nodes/EntityNode";
 import { StatementNode, type StatementNodeType } from "./nodes/StatementNode";
 import {
+  COMPARISON_NODE_HEIGHT,
+  comparisonNodeWidth,
   DEFAULT_STATEMENT_HEIGHT,
   ENTITY_NODE_HEIGHT,
   ENTITY_NODE_WIDTH,
@@ -29,11 +32,12 @@ import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/ty
 import { filingKey, RequestCache } from "@/lib/prefetch";
 import { frame } from "@/lib/viewport";
 
-type BoardNode = EntityNodeType | StatementNodeType;
+type BoardNode = EntityNodeType | StatementNodeType | ComparisonNodeType;
 
 const nodeTypes: NodeTypes = {
   entity: EntityNode,
   statement: StatementNode,
+  comparison: ComparisonNode,
 };
 
 const COLUMN_GAP = 40;
@@ -317,6 +321,57 @@ function BoardInner() {
     [openAccessions, setNodes],
   );
 
+  /**
+   * Put a comparison of everything on the board into its own panel.
+   *
+   * Built from the companies already there rather than from a separate picker:
+   * the board is the selection, so comparing is one action on what the reader
+   * has already assembled instead of choosing the same companies twice.
+   */
+  const compareBoard = useCallback(() => {
+    setNodes((current) => {
+      const entities = current.filter((node): node is EntityNodeType => node.type === "entity");
+      if (entities.length < 2) return current;
+
+      const registrants = entities.map((node) => node.data.entity.registrant);
+      const tickers = registrants.map((r) => r.ticker).filter((t) => t !== "");
+      if (tickers.length < 2) return current;
+
+      // Left of the entity column and vertically centred on it, so it reads as
+      // a summary of the board rather than as another company on it.
+      const top = Math.min(...entities.map((node) => node.position.y));
+      const bottom = Math.max(
+        ...entities.map((node) => node.position.y + (node.height ?? ENTITY_NODE_HEIGHT)),
+      );
+      const width = comparisonNodeWidth(tickers.length);
+
+      const node: ComparisonNodeType = {
+        id: "comparison",
+        type: "comparison",
+        position: {
+          x: -(width + COLUMN_GAP),
+          y: (top + bottom) / 2 - COMPARISON_NODE_HEIGHT / 2,
+        },
+        width,
+        height: COMPARISON_NODE_HEIGHT,
+        data: { tickers, ciks: registrants.map((r) => r.cik), form: "10-K" },
+        dragHandle: ".drag-handle",
+      };
+
+      focusTarget.current = ["comparison"];
+      setFocusToken((token) => token + 1);
+      return [...current.filter((n) => n.id !== node.id), node];
+    });
+  }, [setNodes]);
+
+  /** Companies on the board that a comparison could be built from. */
+  const comparable = useMemo(
+    () =>
+      nodes.filter((node) => node.type === "entity" && node.data.entity.registrant.ticker !== "")
+        .length,
+    [nodes],
+  );
+
   const actions = useMemo<BoardActions>(
     () => ({ toggleFiling, prefetchFiling, openAccessions, pendingAccessions }),
     [toggleFiling, prefetchFiling, openAccessions, pendingAccessions],
@@ -335,18 +390,29 @@ function BoardInner() {
    */
   const edges = useMemo<Edge[]>(
     () =>
-      nodes.flatMap((node) =>
-        node.type === "statement"
-          ? [
-              {
-                id: `edge-${node.id}`,
-                source: `entity-${node.data.cik}`,
-                target: node.id,
-                animated: false,
-              },
-            ]
-          : [],
-      ),
+      nodes.flatMap((node) => {
+        if (node.type === "statement") {
+          return [
+            {
+              id: `edge-${node.id}`,
+              source: `entity-${node.data.cik}`,
+              target: node.id,
+              animated: false,
+            },
+          ];
+        }
+        // A comparison draws from several companies at once, so it gets an
+        // edge from each -- which is also what shows at a glance who is in it.
+        if (node.type === "comparison") {
+          return node.data.ciks.map((cik) => ({
+            id: `edge-${node.id}-${cik}`,
+            source: `entity-${cik}`,
+            target: node.id,
+            animated: false,
+          }));
+        }
+        return [];
+      }),
     [nodes],
   );
 
@@ -385,6 +451,17 @@ function BoardInner() {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center pt-6">
           <div className="pointer-events-auto flex flex-col items-center gap-3">
             <TickerSearch onPick={load} busy={busy} />
+            {/* Appears only once there is something to compare. A control that
+                cannot do anything is chrome competing with the figures. */}
+            {comparable >= 2 && (
+              <button
+                type="button"
+                onClick={compareBoard}
+                className="eyebrow rounded-full border border-hairline-strong bg-surface px-3 py-[5px] text-[9px] text-ink-muted transition hover:border-ink-faint hover:text-ink"
+              >
+                Compare {comparable} companies
+              </button>
+            )}
             {error && (
               <div className="panel rounded-xl px-4 py-2 text-[12px] text-negative">{error}</div>
             )}
