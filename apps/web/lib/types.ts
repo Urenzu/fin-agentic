@@ -26,11 +26,22 @@ export type Coverage = {
   looks_truncated: boolean;
   fact_count: number;
   /**
-   * Facts taking part in at least one satisfied identity. No longer shown as a
-   * share of `fact_count`: see lib/assurance.ts for why that read as an
-   * accuracy score without being one.
+   * Facts taking part in at least one satisfied accounting identity.
+   *
+   * Not a quality score, and deliberately not shown as a share of
+   * `fact_count`. A fact counts as verified only when some identity happens to
+   * touch it, so a correct figure no check covers stays unverified forever --
+   * the ratio can never reach 100% and its distance from 100% says nothing
+   * about whether anything is wrong.
    */
   verified_count: number;
+  /**
+   * How the accounting identities fared over this ledger.
+   *
+   * Carried on the entity summary so a caller can size up a ledger without
+   * fetching the validation endpoint, which returns every individual result --
+   * about 1,600 of them for a filer with twenty years of history.
+   */
   checks_passed: number;
   checks_failed: number;
   checks_skipped: number;

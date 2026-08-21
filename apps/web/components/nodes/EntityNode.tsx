@@ -4,7 +4,6 @@ import { Handle, NodeResizer, Position, useStore, type NodeProps, type Node } fr
 
 import { FilingPicker } from "../FilingPicker";
 import { NodeFrame } from "../NodeFrame";
-import { assuranceHint, assuranceOf, holdsLabel, percent } from "@/lib/assurance";
 import { fitScale, tierFor } from "@/lib/lod";
 import { ENTITY_NODE_HEIGHT, MIN_ENTITY_HEIGHT, MIN_ENTITY_WIDTH } from "@/lib/nodeSize";
 import type { Entity } from "@/lib/types";
@@ -15,27 +14,11 @@ export type EntityNodeData = {
 
 export type EntityNodeType = Node<EntityNodeData, "entity">;
 
-function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "negative";
-}) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div title={hint}>
+    <div>
       <div className="eyebrow text-[9px] text-ink-faint">{label}</div>
-      <div
-        className={`tabular mt-1 text-[13px] font-medium ${
-          tone === "negative" ? "text-negative" : "text-ink"
-        }`}
-      >
-        {value}
-      </div>
+      <div className="tabular mt-1 text-[13px] font-medium text-ink">{value}</div>
     </div>
   );
 }
@@ -54,7 +37,6 @@ const STATE_STYLES: Record<Entity["state"], string> = {
 export function EntityNode({ data, height: live }: NodeProps<EntityNodeType>) {
   const { entity } = data;
   const { registrant, coverage, shape } = entity;
-  const assurance = coverage ? assuranceOf(coverage) : null;
 
   const height = live ?? ENTITY_NODE_HEIGHT;
 
@@ -127,31 +109,10 @@ export function EntityNode({ data, height: live }: NodeProps<EntityNodeType>) {
           </div>
         ) : (
           <div key={tier} className="tier-fade nowheel overflow-auto px-4 py-3">
-            {coverage && assurance ? (
+            {coverage ? (
               <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                 <Stat label="History" value={`${coverage.history_years.toFixed(1)} yrs`} />
                 <Stat label="Annual reports" value={String(coverage.annual_reports)} />
-                {/* Two numbers where there was one. "Corroborated 48%" read as
-                    an accuracy score and was not one -- see lib/assurance.ts.
-                    Splitting it says both what holds and how much was
-                    checkable, which is the part that was being hidden. */}
-                <Stat
-                  label="Identities hold"
-                  // Counts, not a percentage: 910 of 913 rounds to 100%, which
-                  // would show a clean score while three things were broken.
-                  value={holdsLabel(assurance)}
-                  hint={assuranceHint(assurance, coverage.fact_count)}
-                  // Colour marks a ledger where a real share of what was
-                  // checked does not hold. A handful of breaks across hundreds
-                  // of periods is ordinary in real filings, and painting that
-                  // red would make the colour mean nothing.
-                  tone={assurance.holds !== null && assurance.holds < 0.95 ? "negative" : undefined}
-                />
-                <Stat
-                  label="Ledger checked"
-                  value={percent(assurance.coverage)}
-                  hint={assuranceHint(assurance, coverage.fact_count)}
-                />
                 {coverage.earliest && coverage.latest && (
                   <div className="col-span-2">
                     <Stat label="Covering" value={`${coverage.earliest} → ${coverage.latest}`} />
