@@ -62,7 +62,11 @@ test("a first run starts with one empty canvas", () => {
 
 test("what was saved comes back", () => {
   const storage = memoryStorage();
-  const state: StoredState = { canvases: [canvas({ id: "a", name: "Semis" })], selected: "a" };
+  const state: StoredState = {
+    canvases: [canvas({ id: "a", name: "Semis" })],
+    selected: "a",
+    sidebar: false,
+  };
   save(state, storage);
   assert.deepEqual(load(storage), state);
 });
@@ -192,4 +196,22 @@ test("restoring names the companies to resolve", () => {
 test("an empty board snapshots to nothing", () => {
   assert.deepEqual(toSnapshot([]), []);
   assert.deepEqual(filingsToRestore([]), []);
+});
+
+test("the sidebar being hidden is remembered", () => {
+  // A reader who hid it wanted the width for the statements, and did not mean
+  // only until the next reload.
+  const storage = memoryStorage();
+  save({ canvases: [canvas({ id: "a" })], selected: "a", sidebar: false }, storage);
+  assert.equal(load(storage).sidebar, false);
+});
+
+test("state written before the sidebar could be hidden still shows it", () => {
+  const storage = memoryStorage({
+    "finagentic.canvases.v1": JSON.stringify({
+      canvases: [{ id: "a", name: "A", pinned: false, updatedAt: 1, nodes: [] }],
+      selected: "a",
+    }),
+  });
+  assert.equal(load(storage).sidebar, true);
 });

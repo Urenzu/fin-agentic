@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -602,7 +601,6 @@ function BoardInner({ snapshot, onSnapshot }: BoardProps) {
           proOptions={{ hideAttribution: false }}
         >
           <Background variant={BackgroundVariant.Dots} gap={30} size={1} color="#1e1e24" />
-          <Controls position="bottom-right" showInteractive={false} />
           {!empty && (
             <MiniMap
               position="bottom-left"

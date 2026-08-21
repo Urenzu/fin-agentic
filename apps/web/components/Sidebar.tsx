@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { RowMenu } from "./RowMenu";
 import { ordered, tickersOf, type Canvas } from "@/lib/canvas";
 
 /**
@@ -9,8 +10,9 @@ import { ordered, tickersOf, type Canvas } from "@/lib/canvas";
  *
  * Fixed to the left rather than floating over the board, because it is the one
  * piece of chrome that is not about the filing in front of you -- it is where
- * you are, and a panel that comes and goes would make the board feel like it
- * had moved.
+ * you are, and a panel that came and went would make the board feel like it
+ * had moved. It collapses instead, which gives the whole width to the
+ * statements without ever moving them.
  */
 export function Sidebar({
   canvases,
@@ -20,6 +22,7 @@ export function Sidebar({
   onRename,
   onTogglePin,
   onRemove,
+  onCollapse,
 }: {
   canvases: Canvas[];
   selected: string;
@@ -28,6 +31,7 @@ export function Sidebar({
   onRename: (id: string, name: string) => void;
   onTogglePin: (id: string) => void;
   onRemove: (id: string) => void;
+  onCollapse: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -35,25 +39,20 @@ export function Sidebar({
 
   return (
     <aside className="flex h-full w-[232px] shrink-0 flex-col border-r border-hairline bg-void">
-      <div className="flex items-center gap-2 px-3 pb-2 pt-3">
+      <div className="flex items-center gap-1 px-3 pb-2 pt-3">
         <span className="eyebrow flex-1 text-[9px] text-ink-faint">Canvases</span>
-        <button
-          type="button"
-          onClick={onCreate}
-          title="New canvas"
-          aria-label="New canvas"
-          className="rounded p-1 text-ink-faint transition hover:bg-white/[0.06] hover:text-ink"
-        >
-          <svg viewBox="0 0 12 12" aria-hidden className="h-3 w-3">
-            <path
-              d="M6 2v8M2 6h8"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              fill="none"
-            />
-          </svg>
-        </button>
+        <IconButton label="New canvas" onClick={onCreate}>
+          <path d="M6 2v8M2 6h8" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        </IconButton>
+        <IconButton label="Hide the sidebar" onClick={onCollapse}>
+          <path
+            d="M7.5 2.5l-3.5 3.5 3.5 3.5"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </IconButton>
       </div>
 
       <div className="px-3 pb-2">
@@ -97,6 +96,54 @@ export function Sidebar({
   );
 }
 
+/** The control that brings the sidebar back, shown only while it is away. */
+export function SidebarHandle({ onExpand }: { onExpand: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label="Show the sidebar"
+      title="Show the sidebar"
+      className="panel absolute left-3 top-3 z-20 rounded-lg border border-hairline p-1.5 text-ink-faint transition hover:border-hairline-strong hover:text-ink"
+    >
+      <svg viewBox="0 0 12 12" aria-hidden className="h-3 w-3">
+        <path
+          d="M4.5 2.5l3.5 3.5-3.5 3.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      </svg>
+    </button>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="rounded p-1 text-ink-faint transition hover:bg-white/[0.06] hover:text-ink"
+    >
+      <svg viewBox="0 0 12 12" aria-hidden className="h-3 w-3" stroke="currentColor">
+        {children}
+      </svg>
+    </button>
+  );
+}
+
 function Row({
   canvas,
   active,
@@ -132,14 +179,34 @@ function Row({
         <button
           type="button"
           onClick={onSelect}
-          // Double click to rename, so renaming costs no pixels and lands
-          // where the reader already is -- the same gesture the panel headers
-          // use to fit themselves.
+          // Double click renames as well, which is the same gesture the panel
+          // headers use and costs no pixels.
           onDoubleClick={onStartRename}
-          className="block w-full px-2.5 py-[7px] pr-14 text-left"
+          className="block w-full py-[7px] pl-2.5 pr-8 text-left"
         >
-          <span className={`block truncate text-[12px] ${active ? "text-ink" : "text-ink-muted"}`}>
-            {canvas.name}
+          <span className="flex items-center gap-1.5">
+            {canvas.pinned && (
+              // A small mark rather than a filled control: pinned is a
+              // property of the canvas, and the way to change it is the menu.
+              <svg
+                viewBox="0 0 12 12"
+                aria-label="Pinned"
+                role="img"
+                className="h-[9px] w-[9px] shrink-0 text-ink-faint"
+              >
+                <path
+                  d="M4.6 1.5h2.8l-.4 3 1.7 1.6H3.3L5 4.5l-.4-3M6 6.1V10.5"
+                  stroke="currentColor"
+                  strokeWidth="1.1"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  fill="currentColor"
+                />
+              </svg>
+            )}
+            <span className={`truncate text-[12px] ${active ? "text-ink" : "text-ink-muted"}`}>
+              {canvas.name}
+            </span>
           </span>
           <span className="eyebrow tnum mt-[2px] block truncate text-[8.5px] text-ink-faint">
             {/* What is actually on it, which is how a reader recognises a
@@ -150,49 +217,15 @@ function Row({
       )}
 
       {!editing && (
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={onTogglePin}
-            aria-label={canvas.pinned ? "Unpin this canvas" : "Pin this canvas"}
-            title={canvas.pinned ? "Unpin this canvas" : "Pin this canvas"}
-            // A pinned canvas keeps its mark visible; an unpinned one only
-            // offers the control when the row is under the pointer, so a list
-            // of twenty is a list of names rather than forty small icons.
-            className={`rounded p-1 transition hover:bg-white/[0.08] hover:text-ink ${
-              canvas.pinned
-                ? "text-ink"
-                : "text-ink-faint opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-            }`}
-          >
-            <svg viewBox="0 0 12 12" aria-hidden className="h-[11px] w-[11px]">
-              <path
-                d="M4.6 1.5h2.8l-.4 3 1.7 1.6H5.6m-1.9 0H2.3L4 4.5l-.4-3M6 6.1V10.5"
-                stroke="currentColor"
-                strokeWidth="1.1"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                fill={canvas.pinned ? "currentColor" : "none"}
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label="Delete this canvas"
-            title="Delete this canvas"
-            className="rounded p-1 text-ink-faint opacity-0 transition hover:bg-white/[0.08] hover:text-negative focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <svg viewBox="0 0 12 12" aria-hidden className="h-[11px] w-[11px]">
-              <path
-                d="M2.5 2.5l7 7M9.5 2.5l-7 7"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                fill="none"
-              />
-            </svg>
-          </button>
+        <div className="absolute right-1.5 top-1.5">
+          <RowMenu
+            label={`Actions for ${canvas.name}`}
+            items={[
+              { label: "Rename", onSelect: onStartRename },
+              { label: canvas.pinned ? "Unpin" : "Pin to top", onSelect: onTogglePin },
+              { label: "Delete", onSelect: onRemove, danger: true },
+            ]}
+          />
         </div>
       )}
     </div>

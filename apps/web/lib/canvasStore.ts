@@ -20,12 +20,15 @@ const KEY = "finagentic.canvases.v1";
 export type StoredState = {
   canvases: Canvas[];
   selected: string;
+  /** Whether the sidebar is showing. Remembered, because a reader who hid it
+   *  wanted the width for the statements and did not mean only until reload. */
+  sidebar: boolean;
 };
 
 /** A first-run state: one empty canvas, because the board needs somewhere to put things. */
 export function initialState(now = Date.now()): StoredState {
   const first = createCanvas([], now);
-  return { canvases: [first], selected: first.id };
+  return { canvases: [first], selected: first.id, sidebar: true };
 }
 
 /**
@@ -73,7 +76,14 @@ export function load(storage: Storage | undefined = safeStorage()): StoredState 
       typeof selected === "string" && kept.some((canvas) => canvas.id === selected)
         ? selected
         : kept[0]!.id;
-    return { canvases: kept, selected: chosen };
+    const { sidebar } = parsed as Record<string, unknown>;
+    return {
+      canvases: kept,
+      selected: chosen,
+      // Absent in anything written before the sidebar could be hidden, and
+      // showing it is the right default for a reader who has never hidden it.
+      sidebar: typeof sidebar === "boolean" ? sidebar : true,
+    };
   } catch {
     return initialState();
   }

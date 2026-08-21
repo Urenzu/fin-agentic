@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Board } from "./Board";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, SidebarHandle } from "./Sidebar";
 import {
   createCanvas,
   remove,
@@ -63,38 +63,47 @@ export function Workspace() {
   const onCreate = useCallback(() => {
     setState((previous) => {
       const fresh = createCanvas(previous.canvases);
-      return { canvases: [...previous.canvases, fresh], selected: fresh.id };
+      return { ...previous, canvases: [...previous.canvases, fresh], selected: fresh.id };
     });
   }, []);
 
   const onRemove = useCallback((id: string) => {
     setState((previous) => {
       const { canvases: kept, selected: next } = remove(previous.canvases, id);
-      return { canvases: kept, selected: next };
+      return { ...previous, canvases: kept, selected: next };
     });
   }, []);
 
   if (current === undefined) return null;
 
+  const setSidebar = (sidebar: boolean) => setState((previous) => ({ ...previous, sidebar }));
+
   return (
     <div className="flex h-full w-full">
-      <Sidebar
-        canvases={canvases}
-        selected={current.id}
-        onSelect={(id) => setState((previous) => ({ ...previous, selected: id }))}
-        onCreate={onCreate}
-        onRename={(id, name) =>
-          setState((previous) => ({ ...previous, canvases: rename(previous.canvases, id, name) }))
-        }
-        onTogglePin={(id) =>
-          setState((previous) => ({
-            ...previous,
-            canvases: togglePin(previous.canvases, id),
-          }))
-        }
-        onRemove={onRemove}
-      />
+      {state.sidebar && (
+        <Sidebar
+          canvases={canvases}
+          selected={current.id}
+          onSelect={(id) => setState((previous) => ({ ...previous, selected: id }))}
+          onCreate={onCreate}
+          onRename={(id, name) =>
+            setState((previous) => ({
+              ...previous,
+              canvases: rename(previous.canvases, id, name),
+            }))
+          }
+          onTogglePin={(id) =>
+            setState((previous) => ({
+              ...previous,
+              canvases: togglePin(previous.canvases, id),
+            }))
+          }
+          onRemove={onRemove}
+          onCollapse={() => setSidebar(false)}
+        />
+      )}
       <div className="relative min-w-0 flex-1">
+        {!state.sidebar && <SidebarHandle onExpand={() => setSidebar(true)} />}
         {/* Keyed on the canvas, so choosing one builds a fresh board rather
             than asking the old one to unpick itself. */}
         <Board key={current.id} snapshot={current.nodes} onSnapshot={onSnapshot} />
