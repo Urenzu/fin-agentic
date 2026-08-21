@@ -194,6 +194,34 @@ CASH_FLOW_DURATION: dict[Concept, str] = {
 }
 
 #: Cash flow concepts that are instants, keyed to the statement's period end.
+#: Comprehensive income, in millions. Internally consistent:
+#:   other comprehensive income = 40 - 15 + 25   = 50
+#:   comprehensive income       = 1,600 + 50     = 1,650
+COMPREHENSIVE_INCOME: dict[Concept, str] = {
+    Concept.OCI_FOREIGN_CURRENCY: "40",
+    Concept.OCI_DERIVATIVES: "(15)",
+    Concept.OCI_SECURITIES: "25",
+    Concept.OTHER_COMPREHENSIVE_INCOME: "50",
+    Concept.COMPREHENSIVE_INCOME: "1650",
+}
+
+#: What moved equity over the year, in millions. Stored as magnitudes: the
+#: direction belongs to the identity, not to the value.
+#:   5,400 + 1,600 + 50 + 200 + 150 - 900 - 400 - 100 = 6,000
+EQUITY_MOVEMENTS: dict[Concept, str] = {
+    Concept.STOCK_ISSUED: "200",
+    Concept.SHARE_BASED_COMP_EQUITY: "150",
+    Concept.STOCK_REPURCHASED: "900",
+    Concept.DIVIDENDS_DECLARED: "400",
+    Concept.TAX_WITHHOLDING_SHARE_BASED: "100",
+}
+
+#: Equity as it stood at the start of the year, for `two_year_filing`.
+#: The roll-forward is the only identity spanning two balance sheets.
+OPENING_BALANCE: dict[Concept, str] = {
+    Concept.TOTAL_STOCKHOLDERS_EQUITY: "5400",
+}
+
 CASH_FLOW_INSTANT: dict[Concept, str] = {
     Concept.CASH_BEGINNING_OF_PERIOD: "2150",
     Concept.CASH_END_OF_PERIOD: "2500",
@@ -221,8 +249,14 @@ def build_clean_filing(duration: Period, instant: Period) -> FactSet:
     """Assemble the fully consistent fixture ledger."""
     facts: list[FinancialFact] = []
 
-    for concept, raw in {**INCOME_STATEMENT, **CASH_FLOW_DURATION}.items():
+    for concept, raw in {
+        **INCOME_STATEMENT,
+        **CASH_FLOW_DURATION,
+        **COMPREHENSIVE_INCOME,
+        **EQUITY_MOVEMENTS,
+    }.items():
         facts.append(make_fact(concept, duration, _parse(raw)))
+
 
     for concept, raw in {**BALANCE_SHEET, **CASH_FLOW_INSTANT}.items():
         facts.append(make_fact(concept, instant, _parse(raw)))
@@ -238,8 +272,40 @@ def build_clean_filing(duration: Period, instant: Period) -> FactSet:
 
 
 @pytest.fixture
+def fy2023_instant() -> Period:
+    """The 2023-12-31 instant: the balance sheet the year opened from."""
+    return Period(
+        kind=PeriodKind.INSTANT,
+        fiscal_year=2023,
+        fiscal_period=FiscalPeriod.FY,
+        end_date=date(2023, 12, 31),
+    )
+
+
+@pytest.fixture
 def clean_filing(fy2024: Period, fy2024_instant: Period) -> FactSet:
     return build_clean_filing(fy2024, fy2024_instant)
+
+
+@pytest.fixture
+def two_year_filing(clean_filing: FactSet, fy2023_instant: Period) -> FactSet:
+    """The clean filing plus the equity it opened the year with.
+
+    Kept apart from `clean_filing` deliberately. A second instant makes every
+    balance sheet check skip on the opening date as well as pass at year end,
+    so folding it in would turn "this check passes" into "this check passes and
+    also skips" for every test in the suite -- weakening dozens of assertions
+    to serve one. Only the identity that genuinely spans two periods needs it.
+    """
+    return FactSet(
+        [
+            *clean_filing,
+            *(
+                make_fact(concept, fy2023_instant, _parse(raw))
+                for concept, raw in OPENING_BALANCE.items()
+            ),
+        ]
+    )
 
 
 @pytest.fixture

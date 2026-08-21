@@ -143,6 +143,28 @@ TAG_TO_CONCEPT: dict[str, Concept] = {
     "RedeemableNoncontrollingInterestEquityCarryingAmount": Concept.REDEEMABLE_NONCONTROLLING_INTEREST,
     "TemporaryEquityCarryingAmountAttributableToParent": Concept.TEMPORARY_EQUITY_PARENT,
     "LiabilitiesAndStockholdersEquity": Concept.TOTAL_LIABILITIES_AND_EQUITY,
+    # ---- comprehensive income ---------------------------------------------
+    # Only the totals of each category are mapped. A filer prints the movement
+    # before reclassification, the reclassification adjustment, and their sum;
+    # taking all three would count the same amount twice, in the same way that
+    # adding a mezzanine component to a mezzanine total would.
+    "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent": Concept.OTHER_COMPREHENSIVE_INCOME,
+    "OtherComprehensiveIncomeLossNetOfTax": Concept.OTHER_COMPREHENSIVE_INCOME,
+    "OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax": Concept.OCI_FOREIGN_CURRENCY,
+    "OtherComprehensiveIncomeLossCashFlowHedgeGainLossAfterReclassificationAndTax": Concept.OCI_DERIVATIVES,
+    "OtherComprehensiveIncomeLossAvailableForSaleSecuritiesAdjustmentNetOfTax": Concept.OCI_SECURITIES,
+    "OtherComprehensiveIncomeLossPensionAndOtherPostretirementBenefitPlansAdjustmentNetOfTax": Concept.OCI_PENSION,
+    "ComprehensiveIncomeNetOfTax": Concept.COMPREHENSIVE_INCOME,
+    # ---- equity roll-forward ----------------------------------------------
+    "StockIssuedDuringPeriodValueNewIssues": Concept.STOCK_ISSUED,
+    "StockRepurchasedAndRetiredDuringPeriodValue": Concept.STOCK_REPURCHASED,
+    "StockRepurchasedDuringPeriodValue": Concept.STOCK_REPURCHASED,
+    "AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue": Concept.SHARE_BASED_COMP_EQUITY,
+    "AdjustmentsRelatedToTaxWithholdingForShareBasedCompensation": Concept.TAX_WITHHOLDING_SHARE_BASED,
+    "Dividends": Concept.DIVIDENDS_DECLARED,
+    "DividendsCommonStockCash": Concept.DIVIDENDS_DECLARED,
+    "DividendsCash": Concept.DIVIDENDS_DECLARED,
+    "CommonStockDividendsPerShareDeclared": Concept.DIVIDENDS_PER_SHARE,
     # ---- operating cash flow ---------------------------------------------
     "DepreciationDepletionAndAmortization": Concept.DEPRECIATION_AND_AMORTIZATION,
     "DepreciationAmortizationAndAccretionNet": Concept.DEPRECIATION_AND_AMORTIZATION,
@@ -208,6 +230,23 @@ TAG_PRECEDENCE: dict[Concept, tuple[str, ...]] = {
     ),
     # The aggregate wins: it is what the income statement subtotal expects, and
     # a filer printing both means the residual is inside it.
+    # The parent-only figure is what pairs with NET_INCOME, which is also
+    # parent-only, so the identity is not mixing two different populations.
+    Concept.OTHER_COMPREHENSIVE_INCOME: (
+        "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent",
+        "OtherComprehensiveIncomeLossNetOfTax",
+    ),
+    # An aggregate dividend line beats the common-stock-only one: a filer with
+    # preferred shares prints both, and the roll-forward wants the total.
+    Concept.DIVIDENDS_DECLARED: (
+        "Dividends",
+        "DividendsCommonStockCash",
+        "DividendsCash",
+    ),
+    Concept.STOCK_REPURCHASED: (
+        "StockRepurchasedAndRetiredDuringPeriodValue",
+        "StockRepurchasedDuringPeriodValue",
+    ),
     Concept.OTHER_NONOPERATING_INCOME: (
         "NonoperatingIncomeExpense",
         "OtherNonoperatingIncomeExpense",

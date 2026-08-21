@@ -26,31 +26,31 @@ from tests.golden.conftest import CapturedFiling, load
 
 #: Per statement, per filing: the share of us-gaap rows carrying a concept.
 #:
-#: The shape of this table is the finding. Operations is complete; the balance
-#: sheet and cash flow are most of the way there; comprehensive income and the
-#: equity roll-forward are barely modelled at all, and between them account for
-#: nearly every hole. They are also the two statements that tie the other three
-#: together across periods, so the missing coverage costs more than its size.
+#: The shape of this table is the finding, and it has moved. The equity
+#: roll-forward went from a fifth covered to complete for Apple, and
+#: comprehensive income from a tenth to three fifths, once those two statements
+#: were given a vocabulary. What remains is the cash flow statement, whose gaps
+#: are individually-named operating adjustments rather than a missing category.
 FLOORS: dict[tuple[str, str], float] = {
     ("aapl_10k", "OPERATIONS"): 1.00,
-    ("aapl_10k", "COMPREHENSIVE"): 0.10,
-    ("aapl_10k", "BALANCE"): 0.86,
-    ("aapl_10k", "SHAREHOLDERS"): 0.21,
+    ("aapl_10k", "COMPREHENSIVE"): 0.60,
+    ("aapl_10k", "BALANCE"): 0.89,
+    ("aapl_10k", "SHAREHOLDERS"): 1.00,
     ("aapl_10k", "CASH FLOWS"): 0.62,
     ("aapl_10q", "OPERATIONS"): 1.00,
-    ("aapl_10q", "COMPREHENSIVE"): 0.10,
-    ("aapl_10q", "BALANCE"): 0.92,
-    ("aapl_10q", "SHAREHOLDERS"): 0.25,
+    ("aapl_10q", "COMPREHENSIVE"): 0.60,
+    ("aapl_10q", "BALANCE"): 0.96,
+    ("aapl_10q", "SHAREHOLDERS"): 1.00,
     ("aapl_10q", "CASH FLOWS"): 0.62,
     ("tsla_10k", "OPERATIONS"): 1.00,
-    ("tsla_10k", "COMPREHENSIVE"): 0.14,
-    ("tsla_10k", "BALANCE"): 0.67,
-    ("tsla_10k", "REDEEMABLE NONCON"): 0.24,
+    ("tsla_10k", "COMPREHENSIVE"): 0.57,
+    ("tsla_10k", "BALANCE"): 0.75,
+    ("tsla_10k", "REDEEMABLE NONCON"): 0.51,
     ("tsla_10k", "CASH FLOWS"): 0.50,
 }
 
 #: Overall, per filing.
-OVERALL_FLOORS = {"aapl_10k": 0.59, "aapl_10q": 0.56, "tsla_10k": 0.57}
+OVERALL_FLOORS = {"aapl_10k": 0.84, "aapl_10q": 0.87, "tsla_10k": 0.68}
 
 #: How far above its floor a measurement may drift before the floor is stale.
 #: Generous, because the point is to notice a step change rather than to
@@ -59,8 +59,19 @@ RATCHET_SLACK = 0.05
 
 
 def _rows(filing: CapturedFiling, short_name: str):
+    """The rows a reader sees a number on.
+
+    Rows carrying no value in any column are excluded. The equity statement
+    repeats a `[Roll Forward]` element as a structural header once per year
+    column, and counting those as unmapped lines charged the vocabulary for
+    failing to represent something that is not a figure.
+    """
     statement = filing.statement(short_name)
-    return [r for r in statement.rows if not r.is_abstract and r.tag and r.is_us_gaap]
+    return [
+        r
+        for r in statement.rows
+        if not r.is_abstract and r.tag and r.is_us_gaap and r.values
+    ]
 
 
 def measure(name: str) -> tuple[dict[str, tuple[int, int]], tuple[int, int], Counter]:
@@ -142,28 +153,35 @@ def test_the_income_statement_is_completely_covered():
         assert mapped == total, f"{name}: {total - mapped} operations rows lost a concept"
 
 
-def test_the_gap_is_concentrated_in_two_statements():
-    """The claim the roadmap rests on, asserted rather than asserted-about.
+def test_the_equity_statement_is_completely_covered_for_apple():
+    """It was a fifth covered. Every movement between one balance sheet's
+    equity and the next now has a concept, which is what makes the
+    roll-forward identity possible at all."""
+    for name in ("aapl_10k", "aapl_10q"):
+        per_statement, _, _ = measure(name)
+        mapped, total = next(v for k, v in per_statement.items() if "SHAREHOLDERS" in k)
+        assert mapped == total, f"{name}: {total - mapped} equity rows lost a concept"
 
-    If most unmapped rows ever stopped being comprehensive income and the
-    equity roll-forward, the plan to close the gap by modelling those two would
-    no longer be the right plan.
+
+def test_the_remaining_gap_has_moved_to_the_cash_flow_statement():
+    """Where the next round of work is, asserted so the claim stays current.
+
+    Comprehensive income and the equity roll-forward were most of the gap and
+    are no longer. What is left is dominated by the cash flow statement, whose
+    holes are individually-named operating adjustments -- a long tail of
+    filer-specific lines rather than a missing category, so closing it is
+    steady work rather than one more design decision.
     """
-    missing_in_those = missing_total = 0
+    per_kind: dict[str, int] = {}
     for name in OVERALL_FLOORS:
         per_statement, _, _ = measure(name)
         for short_name, (mapped, total) in per_statement.items():
-            gap = total - mapped
-            missing_total += gap
-            if any(
-                marker in short_name
-                for marker in ("COMPREHENSIVE", "SHAREHOLDERS", "REDEEMABLE NONCON")
-            ):
-                missing_in_those += gap
+            kind = "cash flow" if "CASH FLOW" in short_name else "everything else"
+            per_kind[kind] = per_kind.get(kind, 0) + (total - mapped)
 
-    assert missing_total > 0
-    share = missing_in_those / missing_total
-    assert share >= 0.60, (
-        f"only {share:.0%} of unmapped statement lines are in comprehensive "
-        f"income and the equity roll-forward; the coverage plan assumes most are"
+    assert sum(per_kind.values()) > 0
+    share = per_kind.get("cash flow", 0) / sum(per_kind.values())
+    assert share >= 0.35, (
+        f"the cash flow statement is only {share:.0%} of what remains unmapped; "
+        f"the next round of coverage work may belong somewhere else: {per_kind}"
     )

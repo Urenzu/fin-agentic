@@ -152,6 +152,30 @@ class Concept(StrEnum):
     TEMPORARY_EQUITY_PARENT = "TemporaryEquityCarryingAmountAttributableToParent"
     TOTAL_LIABILITIES_AND_EQUITY = "LiabilitiesAndStockholdersEquity"
 
+    # ---- Comprehensive income ---------------------------------------------
+    #: Income statements report what was earned; comprehensive income reports
+    #: what changed in equity for reasons other than earning it -- currency
+    #: translation, unrealised gains on securities, hedge accounting. The
+    #: statement exists because those amounts bypass net income entirely, so
+    #: without them the equity roll-forward cannot close.
+    OTHER_COMPREHENSIVE_INCOME = "OtherComprehensiveIncomeLossNetOfTaxPortionAttributableToParent"
+    OCI_FOREIGN_CURRENCY = "OtherComprehensiveIncomeLossForeignCurrencyTransactionAndTranslationAdjustmentNetOfTax"
+    OCI_DERIVATIVES = "OtherComprehensiveIncomeLossCashFlowHedgeGainLossAfterReclassificationAndTax"
+    OCI_SECURITIES = "OtherComprehensiveIncomeLossAvailableForSaleSecuritiesAdjustmentNetOfTax"
+    OCI_PENSION = "OtherComprehensiveIncomeLossPensionAndOtherPostretirementBenefitPlansAdjustmentNetOfTax"
+    COMPREHENSIVE_INCOME = "ComprehensiveIncomeNetOfTax"
+
+    # ---- Equity roll-forward ----------------------------------------------
+    #: The movements between one balance sheet's equity and the next. Every
+    #: other statement is checked against itself within a single period; these
+    #: are what let a period be checked against the one before it.
+    STOCK_ISSUED = "StockIssuedDuringPeriodValueNewIssues"
+    STOCK_REPURCHASED = "StockRepurchasedAndRetiredDuringPeriodValue"
+    SHARE_BASED_COMP_EQUITY = "AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue"
+    TAX_WITHHOLDING_SHARE_BASED = "AdjustmentsRelatedToTaxWithholdingForShareBasedCompensation"
+    DIVIDENDS_DECLARED = "Dividends"
+    DIVIDENDS_PER_SHARE = "CommonStockDividendsPerShareDeclared"
+
     # ---- Cash flow --------------------------------------------------------
     DEPRECIATION_AND_AMORTIZATION = "DepreciationDepletionAndAmortization"
     STOCK_BASED_COMPENSATION = "ShareBasedCompensation"
@@ -204,6 +228,7 @@ _D = PeriodKind.DURATION
 _IS = Statement.INCOME_STATEMENT
 _BS = Statement.BALANCE_SHEET
 _CF = Statement.CASH_FLOW
+_EQ = Statement.EQUITY
 
 
 CONCEPT_META: dict[Concept, ConceptMeta] = {
@@ -275,6 +300,28 @@ CONCEPT_META: dict[Concept, ConceptMeta] = {
     Concept.REDEEMABLE_NONCONTROLLING_INTEREST: ConceptMeta(_BS, _I, _R, Unit.USD, "Redeemable non-controlling interests"),
     Concept.TEMPORARY_EQUITY_PARENT: ConceptMeta(_BS, _I, _R, Unit.USD, "Temporary equity attributable to parent"),
     Concept.TOTAL_LIABILITIES_AND_EQUITY: ConceptMeta(_BS, _I, _M, Unit.USD, "Total liabilities and equity", is_subtotal=True),
+
+    # ---- Comprehensive income ---------------------------------------------
+    # All AS_REPORTED: a translation adjustment or an unrealised loss is
+    # genuinely negative, and storing it as a magnitude would discard the only
+    # thing the line says.
+    Concept.OTHER_COMPREHENSIVE_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Other comprehensive income (loss)", is_subtotal=True),
+    Concept.OCI_FOREIGN_CURRENCY: ConceptMeta(_IS, _D, _R, Unit.USD, "Foreign currency translation"),
+    Concept.OCI_DERIVATIVES: ConceptMeta(_IS, _D, _R, Unit.USD, "Derivative instruments"),
+    Concept.OCI_SECURITIES: ConceptMeta(_IS, _D, _R, Unit.USD, "Marketable securities"),
+    Concept.OCI_PENSION: ConceptMeta(_IS, _D, _R, Unit.USD, "Pension and postretirement plans"),
+    Concept.COMPREHENSIVE_INCOME: ConceptMeta(_IS, _D, _R, Unit.USD, "Comprehensive income", is_subtotal=True),
+
+    # ---- Equity roll-forward ----------------------------------------------
+    # Magnitudes: the filing prints a repurchase as "(25,000)" because it
+    # reduces equity, and the direction belongs in the identity that consumes
+    # it rather than in the stored sign.
+    Concept.STOCK_ISSUED: ConceptMeta(_EQ, _D, _M, Unit.USD, "Common stock issued"),
+    Concept.STOCK_REPURCHASED: ConceptMeta(_EQ, _D, _M, Unit.USD, "Common stock repurchased"),
+    Concept.SHARE_BASED_COMP_EQUITY: ConceptMeta(_EQ, _D, _M, Unit.USD, "Share-based compensation"),
+    Concept.TAX_WITHHOLDING_SHARE_BASED: ConceptMeta(_EQ, _D, _M, Unit.USD, "Shares withheld for tax"),
+    Concept.DIVIDENDS_DECLARED: ConceptMeta(_EQ, _D, _M, Unit.USD, "Dividends declared"),
+    Concept.DIVIDENDS_PER_SHARE: ConceptMeta(_EQ, _D, _M, Unit.USD_PER_SHARE, "Dividends declared per share"),
 
     # ---- Cash flow --------------------------------------------------------
     Concept.DEPRECIATION_AND_AMORTIZATION: ConceptMeta(_CF, _D, _M, Unit.USD, "Depreciation and amortization"),

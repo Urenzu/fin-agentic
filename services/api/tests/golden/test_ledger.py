@@ -252,3 +252,80 @@ def test_the_label_is_derived_from_the_ledger_not_from_the_filing(apple):
                 f"{fact.concept.value} at {fact.period.end_date} is a year end "
                 f"but is labelled {fact.period.label}"
             )
+
+
+# ---------------------------------------------------------------------------
+# comprehensive income
+# ---------------------------------------------------------------------------
+
+
+def test_comprehensive_income_reconciles_on_a_real_filer(apple):
+    """Net income plus OCI equals comprehensive income, on Apple's own numbers.
+
+    The first identity in the system spanning two statements. Before it, every
+    check compared a statement against itself.
+    """
+    results = [r for r in apple.validation.results if r.check_id == "ci.total"]
+    passed = [r for r in results if r.status is CheckStatus.PASSED]
+
+    assert len(passed) >= 20, f"only {len(passed)} periods reconciled of {len(results)}"
+    assert not [r for r in results if r.status is CheckStatus.FAILED]
+
+
+def test_the_equity_rollforward_is_registered_but_mostly_cannot_run(apple):
+    """Documents a data limitation, so it is not mistaken for a working check.
+
+    The roll-forward is the widest identity here -- two balance sheets, the
+    income statement and the comprehensive income statement at once -- and it
+    is correct and tested against synthetic ledgers. On real filers it almost
+    always skips, because its inputs are not published: `companyfacts` carries
+    no consolidated `StockIssuedDuringPeriodValueNewIssues` at all for Apple,
+    Microsoft, Coca-Cola or JPMorgan. Those lines exist only on the rendered
+    equity statement, which the as-filed path reads and the ledger does not.
+
+    Closing that gap means ingesting exhibits into the ledger, which is its own
+    piece of work. Until then this asserts the honest state: the check runs,
+    declines to evaluate, and names what it wanted.
+    """
+    results = [r for r in apple.validation.results if r.check_id == "eq.rollforward"]
+    assert results, "the roll-forward is not registered"
+    assert not [r for r in results if r.status is CheckStatus.FAILED], (
+        "skipping is expected; failing is not"
+    )
+
+    skipped = [r for r in results if r.status is CheckStatus.SKIPPED]
+    assert skipped, "expected the roll-forward to be skipping on companyfacts data"
+    assert any(r.missing for r in skipped), "a skip must name what it wanted"
+
+
+def test_the_captured_facts_are_not_stale(apple, tesla):
+    """A fixture trimmed to the tag map goes stale the moment the map grows.
+
+    `capture.py` keeps only the tags the vocabulary carries, which is what
+    takes 4.2MB of companyfacts down to 168KB. The cost is that adding a
+    concept leaves the fixture without it, and the tests that should have
+    proved the concept works instead prove nothing -- silently, because a
+    missing tag reads exactly like a filer that never used it.
+
+    That happened: comprehensive income was mapped, and the golden ledger test
+    reported it reconciling in 0 periods of 84 while live data reconciled 56.
+
+    So the fixtures are checked for the concepts that ought to be in them.
+    Regenerate with `python -m tests.golden.capture` when this fails.
+    """
+    expected = (
+        Concept.REVENUE,
+        Concept.TOTAL_ASSETS,
+        Concept.NET_INCOME,
+        Concept.COMPREHENSIVE_INCOME,
+        Concept.OTHER_COMPREHENSIVE_INCOME,
+        Concept.OCI_FOREIGN_CURRENCY,
+    )
+    for record in (apple, tesla):
+        present = {f.concept for f in record.facts}
+        absent = [c.value for c in expected if c not in present]
+        assert absent == [], (
+            f"{record.registrant.ticker}: the captured facts carry no "
+            f"{absent}. The fixture predates these concepts -- re-run "
+            f"`python -m tests.golden.capture`."
+        )
