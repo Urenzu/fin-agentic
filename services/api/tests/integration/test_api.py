@@ -369,3 +369,39 @@ def test_facts_can_be_restricted_to_verified(client):
         f"/entities/{APPLE.cik}/facts", params={"verified_only": True}
     ).json()
     assert all(f["status"] == "verified" for f in body["facts"])
+
+
+def test_coverage_reports_check_counts_not_a_corroborated_ratio(client):
+    """The card needs to say two separate things.
+
+    It used to show `verified_count / fact_count` as "Corroborated", which
+    reads as an accuracy score and is not one: a fact counts as verified only
+    when some identity happens to touch it, so a correct figure no check covers
+    stays unverified forever and the ratio can never reach 100%.
+
+    The counts here separate how much of what was checked holds from how much
+    could be checked at all.
+    """
+    _ingest(client, "AAPL")
+    coverage = client.get(f"/entities/{APPLE.cik}").json()["coverage"]
+
+    for field in ("checks_passed", "checks_failed", "checks_skipped"):
+        assert field in coverage, field
+        assert isinstance(coverage[field], int)
+
+    evaluated = coverage["checks_passed"] + coverage["checks_failed"]
+    assert evaluated > 0, "the fixture filing should evaluate some identities"
+    assert evaluated + coverage["checks_skipped"] == sum(
+        coverage[f] for f in ("checks_passed", "checks_failed", "checks_skipped")
+    )
+
+
+def test_check_counts_agree_with_the_validation_endpoint(client):
+    """Two routes report the same run, so they must not drift apart."""
+    _ingest(client, "AAPL")
+    coverage = client.get(f"/entities/{APPLE.cik}").json()["coverage"]
+    validation = client.get(f"/entities/{APPLE.cik}/validation").json()
+
+    assert coverage["checks_passed"] == validation["passed"]
+    assert coverage["checks_failed"] == validation["failed"]
+    assert coverage["checks_skipped"] == validation["skipped"]

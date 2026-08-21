@@ -25,7 +25,15 @@ export type Coverage = {
   annual_reports: number;
   looks_truncated: boolean;
   fact_count: number;
+  /**
+   * Facts taking part in at least one satisfied identity. No longer shown as a
+   * share of `fact_count`: see lib/assurance.ts for why that read as an
+   * accuracy score without being one.
+   */
   verified_count: number;
+  checks_passed: number;
+  checks_failed: number;
+  checks_skipped: number;
 };
 
 export type Entity = {

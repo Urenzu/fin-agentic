@@ -98,6 +98,9 @@ def _coverage_out(record: EntityRecord) -> s.CoverageOut | None:
         looks_truncated=report.looks_truncated,
         fact_count=len(record.facts),
         verified_count=len(record.facts.usable()),
+        checks_passed=len(record.validation.passed),
+        checks_failed=len(record.validation.failed),
+        checks_skipped=len(record.validation.skipped),
     )
 
 

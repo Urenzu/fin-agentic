@@ -54,7 +54,26 @@ class CoverageOut(BaseModel):
     #: typically a ticker that resolved to a post-reorganisation holding company.
     looks_truncated: bool = False
     fact_count: int = 0
+    #: Facts that took part in at least one satisfied accounting identity.
+    #:
+    #: Kept, but no longer shown as a percentage of `fact_count`. That ratio
+    #: was labelled "corroborated" and read as an accuracy score, when what it
+    #: measures is how much of the ledger any identity happens to touch -- a
+    #: legitimate figure no check covers stays unverified forever, so the
+    #: number could never reach 100% and its distance from 100% said nothing
+    #: about whether anything was wrong.
     verified_count: int = 0
+    #: Accounting identities evaluated over this ledger. `checks_passed` and
+    #: `checks_failed` are the ones that could be evaluated; `checks_skipped`
+    #: wanted a concept the ledger does not carry.
+    #:
+    #: Two honest numbers come out of these. How much of what was checked
+    #: holds: passed / (passed + failed). And how much could be checked at
+    #: all: (passed + failed) / total. The first is the trust signal, the
+    #: second is the coverage signal, and the old ratio conflated them.
+    checks_passed: int = 0
+    checks_failed: int = 0
+    checks_skipped: int = 0
 
 
 IngestState = Literal["ingesting", "ready", "error"]
