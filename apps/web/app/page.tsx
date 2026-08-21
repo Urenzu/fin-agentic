@@ -1,9 +1,9 @@
-import { Board } from "@/components/Board";
+import { Workspace } from "@/components/Workspace";
 
 export default function Page() {
   return (
     <main className="h-screen w-screen">
-      <Board />
+      <Workspace />
     </main>
   );
 }

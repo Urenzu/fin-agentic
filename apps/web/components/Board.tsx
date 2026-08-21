@@ -29,6 +29,8 @@ import {
 } from "@/lib/nodeSize";
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
+import type { CanvasNode } from "@/lib/canvas";
+import { companiesToRestore, filingsToRestore, toSnapshot } from "@/lib/canvasSnapshot";
 import { nextCardOrigin, nextRowOrigin } from "@/lib/placement";
 import { filingKey, RequestCache } from "@/lib/prefetch";
 import { removeFromBoard } from "@/lib/removal";
@@ -118,11 +120,29 @@ function statementRow(
   }));
 }
 
+/** Where a saved node sat, by the id it will be rebuilt under. */
+function positionOf(snapshot: CanvasNode[], id: string): { x: number; y: number } | undefined {
+  const found = snapshot.find((node) => node.kind === "entity" && `entity-${node.cik}` === id);
+  return found ? { x: found.x, y: found.y } : undefined;
+}
+
+/** The board id a saved statement will be rebuilt under. */
+function nodeIdOf(node: CanvasNode, cik: number): string | null {
+  return node.kind === "statement" ? `stmt-${cik}-${node.accession}-${node.shortName}` : null;
+}
+
 function statementNodeId(cik: number, statement: AsFiledStatement): string {
   return `stmt-${cik}-${statement.accession}-${statement.short_name}`;
 }
 
-function BoardInner() {
+type BoardProps = {
+  /** The canvas to draw. Restored on mount; the board is remounted on switch. */
+  snapshot: CanvasNode[];
+  /** Called whenever the board changes, with references rather than figures. */
+  onSnapshot: (nodes: CanvasNode[]) => void;
+};
+
+function BoardInner({ snapshot, onSnapshot }: BoardProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<BoardNode>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -437,6 +457,126 @@ function BoardInner() {
     [nodes],
   );
 
+  /**
+   * Draw the saved canvas.
+   *
+   * Runs once per canvas, because the board is remounted when one is chosen.
+   * The cards go up immediately with what the snapshot remembers, so the
+   * layout is there before any request returns; the filings then arrive and
+   * take the positions they were saved at.
+   */
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || snapshot.length === 0) return;
+    restored.current = true;
+
+    const cards = companiesToRestore(snapshot).map((company) =>
+      entityNode(
+        {
+          registrant: company,
+          state: "ingesting",
+          shape: null,
+          coverage: null,
+          error: null,
+          advisories: [],
+        },
+        positionOf(snapshot, `entity-${company.cik}`) ?? { x: 0, y: 0 },
+      ),
+    );
+    const comparisons = snapshot.flatMap((node) =>
+      node.kind === "comparison"
+        ? [
+            {
+              id: "comparison",
+              type: "comparison" as const,
+              position: { x: node.x, y: node.y },
+              width: node.width ?? comparisonNodeWidth(node.companies.length),
+              height: node.height ?? COMPARISON_NODE_HEIGHT,
+              data: { companies: node.companies, form: node.form },
+              dragHandle: ".drag-handle",
+            },
+          ]
+        : [],
+    );
+    setNodes([...cards, ...comparisons] as BoardNode[]);
+
+    // Coverage and advisories are not in the snapshot -- they are facts about
+    // EDGAR rather than about the board -- so each company is resolved again.
+    for (const company of companiesToRestore(snapshot)) {
+      void (async () => {
+        try {
+          await api.resolveCik(company.cik, company.ticker);
+          await waitForEntity(company.cik, upsertEntity);
+        } catch {
+          // A company that will not resolve leaves its card reading
+          // "ingesting", which is visible and recoverable by reloading.
+        }
+      })();
+    }
+
+    for (const filing of filingsToRestore(snapshot)) {
+      void (async () => {
+        try {
+          const statements = await filings.current.fetch(
+            filingKey(filing.cik, filing.form, filing.accession),
+            (signal) => api.asFiled(filing.cik, filing.form, filing.accession, signal),
+          );
+          const owner = companiesToRestore(snapshot).find((company) => company.cik === filing.cik);
+          setNodes((current) => {
+            const row = statements.flatMap((statement) => {
+              const id = statementNodeId(filing.cik, statement);
+              const saved = snapshot.find(
+                (node) => node.kind === "statement" && nodeIdOf(node, filing.cik) === id,
+              );
+              if (saved === undefined) return [];
+              return [
+                {
+                  id,
+                  type: "statement" as const,
+                  position: { x: saved.x, y: saved.y },
+                  width: saved.width ?? STATEMENT_WIDTH,
+                  height: saved.height ?? DEFAULT_STATEMENT_HEIGHT,
+                  data: {
+                    cik: filing.cik,
+                    // Taken from the company saved alongside, not left blank:
+                    // the eyebrow is what identifies a panel once the board is
+                    // zoomed out far enough that the table is texture, and an
+                    // empty one makes a restored board a wall of grey
+                    // rectangles.
+                    company: owner?.name ?? "",
+                    ticker: owner?.ticker ?? "",
+                    statement,
+                  },
+                  dragHandle: ".drag-handle",
+                },
+              ];
+            });
+            return [
+              ...current.filter((node) => !row.some((added) => added.id === node.id)),
+              ...row,
+            ] as BoardNode[];
+          });
+          setOpenAccessions((open) => new Set(open).add(filing.accession));
+        } catch {
+          // The filing stays off the board rather than half-drawn.
+        }
+      })();
+    }
+  }, [snapshot, setNodes, upsertEntity]);
+
+  /**
+   * Record the board.
+   *
+   * Deferred a moment because a drag reports a new position on every frame,
+   * and writing storage sixty times a second to save the same arrangement
+   * would be work for nothing. Nothing is lost by the delay: the board in
+   * front of the reader is the truth, and this only follows it.
+   */
+  useEffect(() => {
+    const timer = setTimeout(() => onSnapshot(toSnapshot(nodes)), 400);
+    return () => clearTimeout(timer);
+  }, [nodes, onSnapshot]);
+
   const empty = nodes.length === 0;
 
   const defaultEdgeOptions = useMemo(() => ({ style: { stroke: "#2b2b33", strokeWidth: 1 } }), []);
@@ -509,10 +649,10 @@ function BoardInner() {
   );
 }
 
-export function Board() {
+export function Board({ snapshot, onSnapshot }: BoardProps) {
   return (
     <ReactFlowProvider>
-      <BoardInner />
+      <BoardInner snapshot={snapshot} onSnapshot={onSnapshot} />
     </ReactFlowProvider>
   );
 }
