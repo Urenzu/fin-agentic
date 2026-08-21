@@ -193,3 +193,62 @@ def test_no_filer_reports_a_critical_break_everywhere(apple, tesla):
             f"{record.registrant.ticker}: these checks fail in every period, which "
             f"means the identity is wrong rather than the filing: {always_failing}"
         )
+
+
+# ---------------------------------------------------------------------------
+# period labelling
+# ---------------------------------------------------------------------------
+
+
+def test_a_fiscal_year_end_balance_sheet_is_labelled_as_the_year(apple, tesla):
+    """It used to be labelled as a quarter.
+
+    An instant carries no span, so it was placed using the filing's own `fp`
+    field -- and a Q3 10-Q reports the prior year end balance sheet as a
+    comparative stamped `fp=Q3`. Apple's 27 September 2025 year end showed as
+    "Q3 2025" and Tesla's 31 December 2025 as "Q2 2026". Both are correct
+    numbers under a label that contradicts them, which is its own kind of wrong.
+    """
+    assert at(apple, Concept.TOTAL_ASSETS, APPLE_FY2025_END).period.label == "FY2025"
+    assert at(tesla, Concept.TOTAL_ASSETS, TESLA_FY2025_END).period.label == "FY2025"
+
+
+def test_a_quarter_end_balance_sheet_is_named_for_its_quarter(apple):
+    """Not for the year-to-date span that also ends there. A position measured
+    on one day is "Q3", never "9M"."""
+    label = at(apple, Concept.TOTAL_ASSETS, date(2026, 6, 27)).period.label
+    assert label == "Q3 2026"
+
+
+@pytest.mark.parametrize("ticker", ["apple", "tesla"])
+def test_two_balance_sheet_dates_never_share_a_label(ticker, apple, tesla):
+    """A label that names two different dates cannot be read.
+
+    Before the fiscal calendar, Apple's 2025-09-27 and 2025-06-28 both arrived
+    as "Q3 2025" -- a year end and a quarter end, indistinguishable in the UI.
+    """
+    record = apple if ticker == "apple" else tesla
+    by_label: dict[str, set] = {}
+    for fact in record.facts:
+        if fact.period.kind.value != "instant":
+            continue
+        by_label.setdefault(fact.period.label, set()).add(fact.period.end_date)
+
+    collisions = {label: sorted(d) for label, d in by_label.items() if len(d) > 1}
+    assert collisions == {}, f"labels naming more than one date: {collisions}"
+
+
+def test_the_label_is_derived_from_the_ledger_not_from_the_filing(apple):
+    """Every instant on a date some duration closes takes that period's name,
+    so the label agrees with the arithmetic rather than with EDGAR's metadata."""
+    year_ends = {
+        f.period.end_date
+        for f in apple.facts
+        if f.period.kind.value == "duration" and f.period.label.startswith("FY")
+    }
+    for fact in apple.facts:
+        if fact.period.kind.value == "instant" and fact.period.end_date in year_ends:
+            assert fact.period.label.startswith("FY"), (
+                f"{fact.concept.value} at {fact.period.end_date} is a year end "
+                f"but is labelled {fact.period.label}"
+            )

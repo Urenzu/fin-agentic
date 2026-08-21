@@ -346,3 +346,59 @@ def test_every_precedence_entry_is_a_tag_the_map_knows():
                 f"{concept.value} ranks {tag!r}, which maps to "
                 f"{TAG_TO_CONCEPT[tag].value}"
             )
+
+
+# ---------------------------------------------------------------------------
+# the fiscal calendar
+# ---------------------------------------------------------------------------
+
+
+def test_the_calendar_names_a_date_after_the_period_that_closes_it():
+    from finagentic.ingest.xbrl_adapter import build_fiscal_calendar
+
+    observations = [
+        obs("Revenues", start="2024-09-29", end="2025-09-27", fy=2025, fp="FY"),
+        obs("Assets", end="2025-09-27", fy=2026, fp="Q3"),
+    ]
+    calendar = build_fiscal_calendar(observations, {})
+    period = infer_period(observations[1], None, calendar)
+
+    assert period is not None
+    # The filing said Q3 2026; the twelve-month span ending that day says FY2025.
+    assert period.label == "FY2025"
+
+
+def test_without_a_calendar_the_old_behaviour_stands():
+    """An opening balance predating the filed history has no duration to match,
+    and must still be placed rather than dropped."""
+    period = infer_period(obs("Assets", end="2001-06-30", fy=2001, fp="FY"), None, {})
+    assert period is not None
+    assert period.kind is PeriodKind.INSTANT
+
+
+def test_a_year_end_outranks_the_quarter_that_ends_the_same_day():
+    from finagentic.ingest.xbrl_adapter import build_fiscal_calendar
+
+    calendar = build_fiscal_calendar(
+        [
+            obs("Revenues", start="2025-06-29", end="2025-09-27", fy=2025, fp="Q4"),
+            obs("Revenues", start="2024-09-29", end="2025-09-27", fy=2025, fp="FY"),
+        ],
+        {},
+    )
+    assert calendar[date(2025, 9, 27)][0] is FiscalPeriod.FY
+
+
+def test_a_quarter_outranks_the_year_to_date_ending_the_same_day():
+    """A balance sheet is a position, so it is named for the shortest period
+    closing there -- "Q3", not "9M"."""
+    from finagentic.ingest.xbrl_adapter import build_fiscal_calendar
+
+    calendar = build_fiscal_calendar(
+        [
+            obs("Revenues", start="2025-09-28", end="2026-06-27", fy=2026, fp="Q3"),
+            obs("Revenues", start="2026-03-29", end="2026-06-27", fy=2026, fp="Q3"),
+        ],
+        {},
+    )
+    assert calendar[date(2026, 6, 27)][0].is_quarter

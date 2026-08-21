@@ -193,9 +193,59 @@ def _fiscal_year_for(obs: XbrlObservation, context: FilingContext | None) -> int
     return context.fiscal_year - years_back
 
 
+#: Which period a balance sheet date closes, keyed by that date.
+FiscalCalendar = dict[date, tuple[FiscalPeriod, int]]
+
+
+def build_fiscal_calendar(
+    observations: list[XbrlObservation],
+    contexts: dict[str, FilingContext],
+) -> FiscalCalendar:
+    """Map each reporting date to the period it closes.
+
+    Built from the duration observations, whose spans place them unambiguously:
+    a twelve-month period ending 27 September 2025 says that date is Apple's
+    fiscal year end, and the balance sheet drawn up that day belongs to FY2025.
+    Derived rather than assumed because fiscal calendars are not calendar years
+    and do not even repeat -- Apple runs 52 or 53 weeks, so its year end moves
+    between 24 September and 2 October.
+
+    Several durations end on the same day and the one that names the date best
+    wins. A fiscal year end is also a fourth quarter end; the third quarter end
+    closes both a three-month quarter and a nine-month year to date. A balance
+    sheet drawn up that day is "FY2025" or "Q3 2026", never "9M 2026": an
+    instant measures a position, so it takes the name of the shortest period
+    closing there, and the year outranks everything.
+    """
+    calendar: FiscalCalendar = {}
+    for obs in observations:
+        if obs.is_instant:
+            continue
+        period = infer_period(obs, contexts.get(obs.accession))
+        if period is None or period.kind is not PeriodKind.DURATION:
+            continue
+
+        existing = calendar.get(obs.end)
+        if existing is None or _instant_rank(period.fiscal_period) < _instant_rank(existing[0]):
+            calendar[obs.end] = (period.fiscal_period, period.fiscal_year)
+    return calendar
+
+
+def _instant_rank(period: FiscalPeriod) -> int:
+    """How well a duration's name suits a balance sheet closing on its last day."""
+    if period is FiscalPeriod.FY:
+        return 0
+    if period.is_quarter:
+        return 1
+    # H1 and nine-months are cumulative spans. A position measured on one date
+    # is not "the first half", so these only apply when nothing better ends here.
+    return 2
+
+
 def infer_period(
     obs: XbrlObservation,
     context: FilingContext | None = None,
+    calendar: FiscalCalendar | None = None,
 ) -> Period | None:
     """Derive a `Period` from an observation's dates.
 
@@ -207,9 +257,30 @@ def infer_period(
     fiscal_year = _fiscal_year_for(obs, context)
 
     if obs.is_instant:
-        # Instants carry no span to classify, so the filing's label is the only
-        # signal; FY is a safe default because a balance sheet date is a balance
-        # sheet date regardless of which quarter's filing reported it.
+        # An instant carries no span to classify, so it has to be placed by its
+        # date. The filing's own label is the wrong signal and was the one being
+        # used: a Q3 10-Q reports the prior fiscal year end balance sheet as a
+        # comparative and stamps it `fp=Q3`, so Apple's 27 September 2025 year
+        # end was labelled "Q3 2025" and Tesla's 31 December 2025 was labelled
+        # "Q2 2026" -- with two different dates sharing one label.
+        #
+        # The calendar answers it exactly. A balance sheet date is the end of
+        # some reporting period, and that period's own duration is in the same
+        # ledger, so matching on the date says which period it closes without
+        # guessing or tolerancing anything.
+        dated = calendar.get(obs.end) if calendar else None
+        if dated is not None:
+            fiscal_period, calendar_year = dated
+            return Period(
+                kind=PeriodKind.INSTANT,
+                fiscal_year=calendar_year,
+                fiscal_period=fiscal_period,
+                end_date=obs.end,
+            )
+
+        # No duration ends here -- an opening balance from before the filed
+        # history, most often. FY remains the least wrong default: a balance
+        # sheet date is a balance sheet date whichever filing reported it.
         return Period(
             kind=PeriodKind.INSTANT,
             fiscal_year=fiscal_year,
@@ -289,6 +360,9 @@ def to_facts(
     # The filing each observation came from determines how its fiscal-year label
     # is derived, so contexts are built before any observation is placed.
     contexts = build_filing_contexts(observations)
+    # Durations place themselves by their span; instants need the calendar those
+    # durations describe, so it is built first and in full.
+    calendar = build_fiscal_calendar(observations, contexts)
 
     counters: dict[str, int] = defaultdict(int)
     # Keyed by the ledger slot a fact would occupy; several observations compete
@@ -314,7 +388,7 @@ def to_facts(
             counters["skipped_dimensional"] += 1
             continue
 
-        period = infer_period(obs, contexts.get(obs.accession))
+        period = infer_period(obs, contexts.get(obs.accession), calendar)
         if period is None or period.kind is not meta(concept).period_kind:
             counters["skipped_unresolvable_period"] += 1
             continue
