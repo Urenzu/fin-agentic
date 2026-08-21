@@ -29,6 +29,7 @@ import {
 } from "@/lib/nodeSize";
 import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
+import { nextCardOrigin, nextRowOrigin } from "@/lib/placement";
 import { filingKey, RequestCache } from "@/lib/prefetch";
 import { removeFromBoard } from "@/lib/removal";
 import { frame } from "@/lib/viewport";
@@ -128,13 +129,6 @@ function BoardInner() {
   const { setViewport } = useReactFlow();
   const pane = useRef<HTMLDivElement>(null);
 
-  // Where each company's card sits, and how many filing rows it has open.
-  // A filing belongs beside the card it was opened from, so its statements are
-  // placed against that company's own origin rather than at the foot of the
-  // board -- otherwise opening one pushes it arbitrarily far from the picker.
-  const origins = useRef(new Map<number, number>());
-  const rowCounts = useRef(new Map<number, number>());
-
   const [focusToken, setFocusToken] = useState(0);
   const focusedToken = useRef(0);
   const focusTarget = useRef<readonly string[] | null>(null);
@@ -210,16 +204,7 @@ function BoardInner() {
 
       const cardId = `entity-${registrant.cik}`;
       setNodes((current) => {
-        // Below everything already on the board, measured from what is there
-        // rather than from a running total, so a company whose filings have
-        // grown downward is still cleared.
-        const bottom = current.reduce(
-          (lowest, node) => Math.max(lowest, node.position.y + (node.height ?? 0)),
-          0,
-        );
-        const y = current.length === 0 ? 0 : bottom + ROW_GAP;
-        origins.current.set(registrant.cik, y);
-        const card = entityNode(pending, { x: 0, y });
+        const card = entityNode(pending, nextCardOrigin(current, ROW_GAP, ENTITY_NODE_HEIGHT));
         return [...current.filter((node) => node.id !== card.id), card];
       });
       focusTarget.current = [cardId];
@@ -288,25 +273,32 @@ function BoardInner() {
             filingKey(registrant.cik, filing.form, accession),
             (signal) => api.asFiled(registrant.cik, filing.form, accession, signal),
           );
-          const origin = origins.current.get(registrant.cik) ?? 0;
-          const taken = rowCounts.current.get(registrant.cik) ?? 0;
-          const row = statementRow(registrant, statements, {
-            x: STATEMENT_ORIGIN_X,
-            y: origin + taken * ROW_PITCH,
+          // Placed inside the update, because where a row belongs depends on
+          // what is on the board *now* -- which filings are open, and where the
+          // reader has dragged the card.
+          setNodes((current) => {
+            const row = statementRow(
+              registrant,
+              statements,
+              nextRowOrigin(current, registrant.cik, {
+                originX: STATEMENT_ORIGIN_X,
+                rowPitch: ROW_PITCH,
+              }),
+            );
+            return [
+              ...current.filter((node) => !row.some((added) => added.id === node.id)),
+              ...row,
+            ];
           });
-          rowCounts.current.set(registrant.cik, taken + 1);
-
-          setNodes((current) => [
-            ...current.filter((node) => !row.some((added) => added.id === node.id)),
-            ...row,
-          ]);
           setOpenAccessions((current) => new Set(current).add(accession));
           // The card as well as the first statement: framing the row alone
           // takes the picker off screen, and opening a second filing then
           // means panning back to find it.
-          focusTarget.current = [`entity-${registrant.cik}`, row[0]?.id].filter(
-            (id): id is string => id !== undefined,
-          );
+          const first = statements[0];
+          focusTarget.current = [
+            `entity-${registrant.cik}`,
+            first ? statementNodeId(registrant.cik, first) : undefined,
+          ].filter((id): id is string => id !== undefined);
           setFocusToken((token) => token + 1);
         } catch (cause) {
           setError(cause instanceof ApiError ? cause.message : String(cause));
