@@ -1,12 +1,20 @@
 """Pipeline orchestration and the in-process entity store.
 
-Ingesting a company means fetching several MB from EDGAR, adapting ~25,000
-observations and running the validation layer -- seconds on a cold cache. Doing
-that inside a request would make the first load for any ticker feel broken, so
-`request_ingest` starts the work and returns immediately; the client polls until
-the entity reports `ready`.
+Resolving a company means fetching several MB of `companyfacts` from EDGAR --
+seconds on a cold cache. Doing that inside a request would make the first load
+for any ticker feel broken, so `request_ingest` starts the work and returns
+immediately; the client polls until the entity reports `ready`.
 
-The store is in-process for now. Postgres persistence is on the roadmap, and the
+What that work produces is now small: how far the filings go back, how many
+annual reports there are, and what kind of filer this is. The canonical ledger
+that used to be built here -- mapping every observation onto a concept
+vocabulary, inferring periods, reconciling restatements and running twenty
+accounting identities over the result -- is gone. Statements are rendered as
+filed, checked against the arithmetic the filer publishes with them, and
+compared through a twelve-metric map; none of those needs a vocabulary spanning
+every line of every filer, which is the thing that could never be finished.
+
+The store is in-process for now. Postgres persistence is next, and the
 interface here is deliberately narrow so swapping the backing store does not
 reach into the API layer.
 """
@@ -15,11 +23,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from finagentic.compare.extract import FilingMetrics, metrics_for
 from finagentic.config import settings
-from finagentic.domain.ledger import FactSet
+from finagentic.ingest.coverage import Coverage, summarise
 from finagentic.ingest.edgar import (
     EdgarClient,
     EdgarError,
@@ -30,24 +38,19 @@ from finagentic.ingest.edgar import (
 )
 from finagentic.ingest.rfiles import AsFiledStatement, parse_statement
 from finagentic.ingest.shapes import ShapeAssessment, detect_shape
-from finagentic.ingest.xbrl_adapter import AdaptationReport, to_facts
 from finagentic.validation.asfiled import FilingReconciliation, reconcile
-from finagentic.validation.engine import validate
-from finagentic.validation.results import ValidationReport
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class EntityRecord:
-    """One company's ingested state."""
+    """One company's resolved state."""
 
     registrant: Registrant
     state: str = "ingesting"
-    facts: FactSet = field(default_factory=FactSet)
+    coverage: Coverage | None = None
     shape: ShapeAssessment | None = None
-    adaptation: AdaptationReport | None = None
-    validation: ValidationReport | None = None
     error: str | None = None
 
     @property
@@ -59,10 +62,10 @@ class EntityRecord:
         being built on the wrong data.
         """
         notes: list[str] = []
-        if self.adaptation is not None and self.adaptation.looks_truncated:
+        if self.coverage is not None and self.coverage.looks_truncated:
             notes.append(
-                f"Only {self.adaptation.history_years:.1f} years of filings were "
-                f"found for this entity, with {self.adaptation.annual_reports} "
+                f"Only {self.coverage.history_years:.1f} years of filings were "
+                f"found for this entity, with {self.coverage.annual_reports} "
                 f"annual reports. A ticker resolves to whichever CIK currently "
                 f"holds it, so after a corporate reorganisation it points at the "
                 f"new holding company rather than the operating history. The "
@@ -155,31 +158,25 @@ class EntityService:
 
 
 def _run_pipeline(client: EdgarClient, record: EntityRecord) -> None:
-    """Fetch, adapt and validate. Runs in a worker thread."""
+    """Fetch and summarise. Runs in a worker thread.
+
+    Both answers come from the raw tag set and the raw dates. Nothing is
+    mapped, so nothing can be lost by failing to map it.
+    """
     observations = client.observations(record.registrant)
 
-    # Shape is detected from the raw tag set, before adaptation drops everything
-    # the commercial map does not know -- which is exactly the evidence that
-    # identifies a non-commercial filer.
     record.shape = detect_shape({o.tag for o in observations})
-
-    facts, adaptation = to_facts(observations, record.registrant)
-    verified, validation = validate(facts)
-
-    record.facts = verified
-    record.adaptation = adaptation
-    record.validation = validation
-
-
+    record.coverage = summarise(observations)
 
 
 class AsFiledService:
     """Fetches and parses the SEC's rendered statement exhibits.
 
     Separate from EntityService because the two answer different questions and
-    have different costs. `EntityService` builds a canonical ledger spanning a
-    company's whole history, for charts and comparison. This fetches one
-    filing's statements as the filer laid them out, for display.
+    have different costs. `EntityService` summarises a company's whole filing
+    history in one request. This works a filing at a time: its statements as
+    the filer laid them out, the arithmetic they published with it, and the
+    handful of figures that compare across companies.
     """
 
     def __init__(self, client: EdgarClient) -> None:

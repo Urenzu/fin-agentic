@@ -14,8 +14,6 @@ absent.
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -29,11 +27,7 @@ from finagentic.api.service import (
 )
 from finagentic.compare.metrics import LABELS, Metric, is_instant, unit
 from finagentic.config import settings
-from finagentic.domain.concepts import Statement, meta
-from finagentic.domain.facts import XbrlProvenance
-from finagentic.domain.ledger import FactSet
 from finagentic.ingest.edgar import EdgarError, Registrant
-from finagentic.presentation.statements import annual_periods, build_statement
 
 app = FastAPI(
     title="fin-agentic",
@@ -92,20 +86,16 @@ def _shape_out(record: EntityRecord) -> s.ShapeOut | None:
 
 
 def _coverage_out(record: EntityRecord) -> s.CoverageOut | None:
-    report = record.adaptation
-    if report is None:
+    coverage = record.coverage
+    if coverage is None:
         return None
     return s.CoverageOut(
-        earliest=report.earliest.isoformat() if report.earliest else None,
-        latest=report.latest.isoformat() if report.latest else None,
-        history_years=round(report.history_years, 1),
-        annual_reports=report.annual_reports,
-        looks_truncated=report.looks_truncated,
-        fact_count=len(record.facts),
-        verified_count=len(record.facts.usable()),
-        checks_passed=len(record.validation.passed),
-        checks_failed=len(record.validation.failed),
-        checks_skipped=len(record.validation.skipped),
+        earliest=coverage.earliest.isoformat() if coverage.earliest else None,
+        latest=coverage.latest.isoformat() if coverage.latest else None,
+        history_years=round(coverage.history_years, 1),
+        annual_reports=coverage.annual_reports,
+        looks_truncated=coverage.looks_truncated,
+        observations=coverage.observations,
     )
 
 
@@ -120,47 +110,9 @@ def _entity_out(record: EntityRecord) -> s.EntityOut:
     )
 
 
-def _fact_out(fact: object) -> s.FactOut:
-    provenance = fact.provenance  # type: ignore[attr-defined]
-    return s.FactOut(
-        id=str(fact.id),  # type: ignore[attr-defined]
-        concept=fact.concept.value,  # type: ignore[attr-defined]
-        label=meta(fact.concept).label,  # type: ignore[attr-defined]
-        period_label=fact.period.label,  # type: ignore[attr-defined]
-        period_end=fact.period.end_date.isoformat(),  # type: ignore[attr-defined]
-        value=format(fact.value, "f"),  # type: ignore[attr-defined]
-        unit=fact.unit,  # type: ignore[attr-defined]
-        status=fact.status,  # type: ignore[attr-defined]
-        source=provenance.source,
-        source_url=getattr(provenance, "filing_url", None),
-        source_label=(
-            provenance.tag
-            if isinstance(provenance, XbrlProvenance)
-            else getattr(provenance, "row_label", None)
-        ),
-    )
-
-
-def _decimal_out(value: Decimal | None) -> str | None:
-    return None if value is None else format(value, "f")
-
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
-def _require_ready(service: EntityService, cik: int) -> EntityRecord:
-    record = service.get(cik)
-    if record is None:
-        raise HTTPException(404, f"CIK {cik} has not been requested. POST /entities/resolve first.")
-    if record.state == "error":
-        raise HTTPException(502, record.error or "Ingestion failed.")
-    if record.state != "ready":
-        # 409 rather than 202: the client asked for a resource that is not yet
-        # in a state to be represented, and should poll GET /entities/{cik}.
-        raise HTTPException(409, "Still ingesting. Poll GET /entities/{cik} until state is ready.")
-    return record
 
 
 # ---------------------------------------------------------------------------
@@ -235,119 +187,6 @@ def get_entity(cik: int, service: EntityService = Depends(get_service)) -> s.Ent
     if record is None:
         raise HTTPException(404, f"CIK {cik} has not been requested.")
     return _entity_out(record)
-
-
-@app.get("/entities/{cik}/statements/{statement}", response_model=s.StatementOut)
-def get_statement(
-    cik: int,
-    statement: Statement,
-    periods: int = Query(settings.default_periods, ge=1, le=20),
-    include_unverified: bool = Query(True),
-    service: EntityService = Depends(get_service),
-) -> s.StatementOut:
-    record = _require_ready(service, cik)
-
-    selected = annual_periods(record.facts, statement, limit=periods)
-    view = build_statement(
-        record.facts, statement, selected, include_unverified=include_unverified
-    )
-
-    shape = _shape_out(record)
-    assert shape is not None  # a ready record always carries a shape
-
-    return s.StatementOut(
-        statement=view.statement,
-        period_labels=view.period_labels,
-        lines=tuple(
-            s.LineOut(
-                concept=line.concept.value,
-                label=line.label,
-                indent=line.indent,
-                is_subtotal=line.is_subtotal,
-                unit=line.unit,
-                cells={
-                    period: s.CellOut(
-                        value=format(cell.value, "f"),
-                        status=cell.status,
-                        verified=cell.is_verified,
-                        fact_id=str(cell.fact_id),
-                        source_url=cell.source_url,
-                        source_label=cell.source_label,
-                    )
-                    for period, cell in line.cells.items()
-                },
-            )
-            for line in view.lines
-        ),
-        verified_ratio=round(view.verified_ratio, 4),
-        shape=shape,
-        advisories=record.advisories,
-    )
-
-
-@app.get("/entities/{cik}/validation", response_model=s.ValidationOut)
-def get_validation(
-    cik: int,
-    status: str | None = Query(None, description="Filter: passed, failed or skipped"),
-    service: EntityService = Depends(get_service),
-) -> s.ValidationOut:
-    record = _require_ready(service, cik)
-    report = record.validation
-    if report is None:
-        raise HTTPException(500, "Entity is ready but carries no validation report.")
-
-    results = report.results
-    if status is not None:
-        results = tuple(r for r in results if r.status.value == status)
-
-    return s.ValidationOut(
-        passed=len(report.passed),
-        failed=len(report.failed),
-        skipped=len(report.skipped),
-        is_clean=report.is_clean,
-        results=tuple(
-            s.CheckOut(
-                check_id=r.check_id,
-                identity=r.identity,
-                status=r.status,
-                severity=r.severity,
-                period_label=r.period_label,
-                expected=_decimal_out(r.expected),
-                actual=_decimal_out(r.actual),
-                delta=_decimal_out(r.delta),
-                tolerance=_decimal_out(r.tolerance),
-                missing=r.missing,
-                message=r.message,
-            )
-            for r in results
-        ),
-    )
-
-
-@app.get("/entities/{cik}/facts", response_model=s.FactsOut)
-def get_facts(
-    cik: int,
-    concept: str | None = Query(None),
-    period: str | None = Query(None, description="Period label, e.g. FY2024"),
-    verified_only: bool = Query(False),
-    limit: int = Query(500, ge=1, le=5000),
-    service: EntityService = Depends(get_service),
-) -> s.FactsOut:
-    record = _require_ready(service, cik)
-
-    facts: FactSet = record.facts.usable() if verified_only else record.facts
-    selected = [
-        f
-        for f in facts
-        if (concept is None or f.concept.value == concept)
-        and (period is None or f.period.label == period)
-    ]
-    selected.sort(key=lambda f: (f.period.end_date, f.concept.value))
-
-    return s.FactsOut(
-        facts=tuple(_fact_out(f) for f in selected[:limit]),
-        total=len(selected),
-    )
 
 
 # ---------------------------------------------------------------------------

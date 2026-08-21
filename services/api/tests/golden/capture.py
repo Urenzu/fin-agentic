@@ -31,7 +31,7 @@ import json
 from pathlib import Path
 
 from finagentic.api.service import AsFiledService, EntityService
-from finagentic.ingest.tag_map import TAG_TO_CONCEPT
+from finagentic.ingest.linkbase import calculation_filename
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -49,10 +49,27 @@ CAPTURES = [
     ("tsla_10k", "TSLA", "10-K"),
 ]
 
-#: Ledger fixtures. Trimmed to the tags the concept vocabulary carries, which
-#: takes 4.2MB of companyfacts down to 115KB gzipped without changing any
-#: number the ledger would have seen.
+#: Fact fixtures, for checking a filing against the arithmetic its filer
+#: published. Kept whole rather than trimmed to a list of tags: a calculation
+#: linkbase names whichever elements the filer chose, so trimming to a
+#: vocabulary of ours would drop exactly the terms a relationship needs -- and
+#: would go stale the moment that vocabulary changed, which it did.
 FACT_CAPTURES = [("aapl", "AAPL"), ("tsla", "TSLA")]
+
+
+def _linkbase(service: EntityService, filing) -> str | None:
+    """The raw calculation linkbase, if the filing publishes one."""
+    summary = service._client._get_text(
+        f"{filing.base_url}/FilingSummary.xml",
+        cache_key=f"filingsummary_{filing.accession_nodash}",
+    )
+    name = calculation_filename(summary)
+    if name is None:
+        return None
+    return service._client._get_text(
+        f"{filing.base_url}/{name}",
+        cache_key=f"calculation_{filing.accession_nodash}",
+    )
 
 
 def _write(name: str, payload: object) -> None:
@@ -91,6 +108,10 @@ def capture_filings(service: EntityService, as_filed: AsFiledService) -> None:
                 "exhibits": {
                     r.filename: service._client.fetch_report(filing, r) for r in reports
                 },
+                # The filer's own arithmetic, captured beside the figures it is
+                # about. Not every filing has one -- Microsoft's ships none at
+                # all -- so its absence is recorded rather than assumed away.
+                "calculation_linkbase": _linkbase(service, filing),
             },
         )
 
@@ -108,10 +129,7 @@ def capture_facts(service: EntityService) -> None:
                     "ticker": registrant.ticker,
                     "name": registrant.name,
                 },
-                # Only mapped tags. An unmapped tag cannot reach the ledger, so
-                # keeping it would inflate the fixture without changing a
-                # single assertion. The coverage test reads exhibits, not this.
-                "facts": {"us-gaap": {t: b for t, b in gaap.items() if t in TAG_TO_CONCEPT}},
+                "facts": {"us-gaap": gaap},
             },
         )
 

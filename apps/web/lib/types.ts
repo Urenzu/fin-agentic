@@ -24,27 +24,14 @@ export type Coverage = {
   history_years: number;
   annual_reports: number;
   looks_truncated: boolean;
-  fact_count: number;
   /**
-   * Facts taking part in at least one satisfied accounting identity.
-   *
-   * Not a quality score, and deliberately not shown as a share of
-   * `fact_count`. A fact counts as verified only when some identity happens to
-   * touch it, so a correct figure no check covers stays unverified forever --
-   * the ratio can never reach 100% and its distance from 100% says nothing
-   * about whether anything is wrong.
+   * How many figures EDGAR published for this filer. A sense of scale, not a
+   * quality measure -- there was once a "corroborated" ratio here, which read
+   * as an accuracy score while measuring how much of a canonical ledger some
+   * accounting identity happened to touch. Both the ledger and the ratio are
+   * gone.
    */
-  verified_count: number;
-  /**
-   * How the accounting identities fared over this ledger.
-   *
-   * Carried on the entity summary so a caller can size up a ledger without
-   * fetching the validation endpoint, which returns every individual result --
-   * about 1,600 of them for a filer with twenty years of history.
-   */
-  checks_passed: number;
-  checks_failed: number;
-  checks_skipped: number;
+  observations: number;
 };
 
 export type Entity = {
@@ -100,28 +87,6 @@ export type FilingIndex = {
   period_end: string | null;
   source_url: string;
   statements: { filename: string; name: string }[];
-};
-
-export type ValidationResult = {
-  check_id: string;
-  identity: string;
-  status: "passed" | "failed" | "skipped";
-  severity: string;
-  period_label: string;
-  expected: string | null;
-  actual: string | null;
-  delta: string | null;
-  tolerance: string | null;
-  missing: string[];
-  message: string;
-};
-
-export type Validation = {
-  passed: number;
-  failed: number;
-  skipped: number;
-  is_clean: boolean;
-  results: ValidationResult[];
 };
 
 export type MetricValue = {

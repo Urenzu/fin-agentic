@@ -13,19 +13,11 @@ it currently happens to matter.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from finagentic.domain.concepts import Statement, Unit
-from finagentic.domain.facts import FactStatus
 from finagentic.ingest.shapes import EntityShape
-from finagentic.validation.results import CheckStatus, Severity
-
-
-def _decimal_str(value: Decimal | None) -> str | None:
-    return None if value is None else format(value, "f")
 
 
 class RegistrantOut(BaseModel):
@@ -44,7 +36,14 @@ class ShapeOut(BaseModel):
 
 
 class CoverageOut(BaseModel):
-    """How much of the company's history we hold, and how much of it reconciles."""
+    """How much of the company's filing history EDGAR holds.
+
+    Four figures, taken from the observations' own dates and accessions. There
+    was once a fact count and a "corroborated" ratio here, both by-products of
+    a canonical ledger that no longer exists -- and the ratio was never what it
+    looked like, since it measured how much of the ledger some accounting
+    identity happened to touch rather than how much of it was right.
+    """
 
     earliest: str | None = None
     latest: str | None = None
@@ -53,27 +52,9 @@ class CoverageOut(BaseModel):
     #: True when the ledger is too thin to be the company the user meant --
     #: typically a ticker that resolved to a post-reorganisation holding company.
     looks_truncated: bool = False
-    fact_count: int = 0
-    #: Facts that took part in at least one satisfied accounting identity.
-    #:
-    #: Kept, but no longer shown as a percentage of `fact_count`. That ratio
-    #: was labelled "corroborated" and read as an accuracy score, when what it
-    #: measures is how much of the ledger any identity happens to touch -- a
-    #: legitimate figure no check covers stays unverified forever, so the
-    #: number could never reach 100% and its distance from 100% said nothing
-    #: about whether anything was wrong.
-    verified_count: int = 0
-    #: Accounting identities evaluated over this ledger. `checks_passed` and
-    #: `checks_failed` are the ones that could be evaluated; `checks_skipped`
-    #: wanted a concept the ledger does not carry.
-    #:
-    #: Two honest numbers come out of these. How much of what was checked
-    #: holds: passed / (passed + failed). And how much could be checked at
-    #: all: (passed + failed) / total. The first is the trust signal, the
-    #: second is the coverage signal, and the old ratio conflated them.
-    checks_passed: int = 0
-    checks_failed: int = 0
-    checks_skipped: int = 0
+    #: How many figures EDGAR published for this filer. A sense of scale, not a
+    #: quality measure.
+    observations: int = 0
 
 
 IngestState = Literal["ingesting", "ready", "error"]
@@ -93,79 +74,6 @@ class EntityOut(BaseModel):
     #: Kept as a required field so it cannot be forgotten: a truncated history or
     #: an unsupported statement structure has to reach the screen.
     advisories: tuple[str, ...] = ()
-
-
-class CellOut(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    value: str
-    status: FactStatus
-    verified: bool
-    fact_id: str
-    source_url: str | None = None
-    source_label: str | None = None
-
-
-class LineOut(BaseModel):
-    concept: str
-    label: str
-    indent: int
-    is_subtotal: bool
-    unit: Unit
-    #: Keyed by period label. A missing key means the company did not report the
-    #: line, which is different from reporting zero.
-    cells: dict[str, CellOut]
-
-
-class StatementOut(BaseModel):
-    statement: Statement
-    period_labels: tuple[str, ...]
-    lines: tuple[LineOut, ...]
-    #: Share of rendered values corroborated by an accounting identity.
-    verified_ratio: float
-    shape: ShapeOut
-    advisories: tuple[str, ...] = ()
-
-
-class CheckOut(BaseModel):
-    check_id: str
-    identity: str
-    status: CheckStatus
-    severity: Severity
-    period_label: str
-    expected: str | None = None
-    actual: str | None = None
-    delta: str | None = None
-    tolerance: str | None = None
-    missing: tuple[str, ...] = ()
-    message: str
-
-
-class ValidationOut(BaseModel):
-    passed: int
-    failed: int
-    skipped: int
-    is_clean: bool
-    results: tuple[CheckOut, ...]
-
-
-class FactOut(BaseModel):
-    id: str
-    concept: str
-    label: str
-    period_label: str
-    period_end: str
-    value: str
-    unit: Unit
-    status: FactStatus
-    source: str
-    source_url: str | None = None
-    source_label: str | None = None
-
-
-class FactsOut(BaseModel):
-    facts: tuple[FactOut, ...]
-    total: int
 
 
 class SearchResultOut(BaseModel):

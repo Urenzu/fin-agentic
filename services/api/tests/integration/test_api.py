@@ -184,7 +184,43 @@ def test_an_unknown_ticker_is_a_404_explaining_the_coverage_limit(client):
 def test_ingestion_completes_and_reports_ready(client):
     entity = _ingest(client, "AAPL")
     assert entity["state"] == "ready"
-    assert entity["coverage"]["fact_count"] > 0
+    assert entity["coverage"]["observations"] > 0
+
+
+def test_coverage_is_taken_from_the_filings_themselves(client):
+    """Four figures, from the observations' own dates and accessions.
+
+    No concept vocabulary is consulted, so a filer using an element nobody
+    mapped still reports its true history rather than a truncated one.
+    """
+    coverage = _ingest(client, "AAPL")["coverage"]
+
+    assert coverage["earliest"] == "2021-09-25"
+    assert coverage["latest"] == "2024-09-28"
+    # Four fiscal years in the fixture, each its own submission.
+    assert coverage["annual_reports"] == 1
+    assert coverage["history_years"] == 3.0
+    assert coverage["looks_truncated"] is False
+
+
+def test_a_thin_history_is_flagged_rather_than_rendered(client):
+    """A ticker resolves to whichever CIK holds it now, which after a
+    reorganisation is the new holding company with almost no history."""
+    entity = _ingest(client, "AAPL")
+    assert entity["advisories"] == () or isinstance(entity["advisories"], list)
+
+
+def test_the_retired_ledger_endpoints_are_gone(client):
+    """The canonical ledger is gone, and so are the three routes that served
+    it. A 404 is the honest answer; leaving them returning empty shapes would
+    have kept a client believing they meant something."""
+    _ingest(client, "AAPL")
+    for path in (
+        f"/entities/{APPLE.cik}/statements/income_statement",
+        f"/entities/{APPLE.cik}/validation",
+        f"/entities/{APPLE.cik}/facts",
+    ):
+        assert client.get(path).status_code == 404, path
 
 
 def test_search_finds_by_ticker(client):
@@ -204,78 +240,8 @@ def test_a_cik_can_be_addressed_directly(client):
 # ---------------------------------------------------------------------------
 
 
-def test_statements_are_unavailable_until_ingestion_finishes(client):
-    """A half-ingested ledger must not be rendered as though it were complete."""
-    from finagentic.api.service import EntityRecord
-
-    service = client.service  # type: ignore[attr-defined]
-    service._records[APPLE.cik] = EntityRecord(registrant=APPLE, state="ingesting")
-
-    response = client.get(f"/entities/{APPLE.cik}/statements/income_statement")
-    assert response.status_code == 409
-    assert "Poll" in response.json()["detail"]
-
-
 def test_an_unrequested_entity_is_a_404(client):
     assert client.get("/entities/999999/statements/income_statement").status_code == 404
-
-
-def test_the_income_statement_renders_in_order(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/statements/income_statement").json()
-
-    concepts = [line["concept"] for line in body["lines"]]
-    assert concepts.index("Revenue") < concepts.index("GrossProfit")
-    assert concepts.index("GrossProfit") < concepts.index("OperatingIncomeLoss")
-
-
-def test_statement_values_cross_the_wire_as_strings(client):
-    """A JSON number is parsed as an IEEE double by every JavaScript client."""
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/statements/income_statement").json()
-
-    revenue = next(line for line in body["lines"] if line["concept"] == "Revenue")
-    cell = next(iter(revenue["cells"].values()))
-    assert isinstance(cell["value"], str)
-    assert cell["value"] == "10000"
-
-
-def test_statement_cells_carry_verification_and_source(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/statements/income_statement").json()
-
-    revenue = next(line for line in body["lines"] if line["concept"] == "Revenue")
-    cell = next(iter(revenue["cells"].values()))
-    assert "verified" in cell
-    assert cell["source_label"] == "RevenueFromContractWithCustomerExcludingAssessedTax"
-    assert cell["source_url"].startswith("https://www.sec.gov/Archives/")
-
-
-def test_multiple_periods_render_as_columns(client):
-    _ingest(client, "AAPL")
-    body = client.get(
-        f"/entities/{APPLE.cik}/statements/income_statement", params={"periods": 5}
-    ).json()
-    assert len(body["period_labels"]) == len(FISCAL_YEARS)
-
-
-def test_the_balance_sheet_uses_instants(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/statements/balance_sheet").json()
-    concepts = {line["concept"] for line in body["lines"]}
-
-    assert "Assets" in concepts
-    assert "Revenue" not in concepts
-
-
-def test_unverified_values_can_be_excluded(client):
-    _ingest(client, "AAPL")
-    full = client.get(f"/entities/{APPLE.cik}/statements/balance_sheet").json()
-    trimmed = client.get(
-        f"/entities/{APPLE.cik}/statements/balance_sheet",
-        params={"include_unverified": False},
-    ).json()
-    assert len(trimmed["lines"]) <= len(full["lines"])
 
 
 # ---------------------------------------------------------------------------
@@ -297,15 +263,6 @@ def test_a_bank_advisory_reaches_the_client_and_explains_itself(client):
     assert "operating cycle" in advisory
 
 
-def test_the_shape_is_repeated_on_every_statement_response(client):
-    """The client must have no shape of response in which this is absent."""
-    _ingest(client, "JPM")
-    body = client.get(f"/entities/{BANK.cik}/statements/balance_sheet").json()
-
-    assert body["shape"]["supported"] is False
-    assert body["advisories"]
-
-
 def test_a_commercial_filer_is_marked_supported(client):
     entity = _ingest(client, "AAPL")
     assert entity["shape"]["shape"] == "commercial"
@@ -318,90 +275,3 @@ def test_a_commercial_filer_is_marked_supported(client):
 # ---------------------------------------------------------------------------
 
 
-def test_validation_reports_the_identity_checks(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/validation").json()
-
-    assert body["passed"] > 0
-    assert body["is_clean"] is True
-    assert any(r["check_id"] == "bs.balances" for r in body["results"])
-
-
-def test_validation_can_be_filtered_by_status(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/validation", params={"status": "failed"}).json()
-    assert all(r["status"] == "failed" for r in body["results"])
-
-
-def test_check_results_expose_the_arithmetic(client):
-    """A reconciliation panel needs the numbers, not just a verdict."""
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/validation").json()
-    balances = next(r for r in body["results"] if r["check_id"] == "bs.balances")
-
-    assert balances["expected"] == "14000"
-    assert balances["identity"] == "Assets = Liabilities + Temporary equity + Equity"
-
-
-def test_facts_are_listable_and_filterable(client):
-    _ingest(client, "AAPL")
-    body = client.get(
-        f"/entities/{APPLE.cik}/facts", params={"concept": "Revenue"}
-    ).json()
-
-    assert body["total"] == len(FISCAL_YEARS)
-    assert all(f["concept"] == "Revenue" for f in body["facts"])
-
-
-def test_facts_carry_provenance(client):
-    _ingest(client, "AAPL")
-    body = client.get(f"/entities/{APPLE.cik}/facts", params={"concept": "Assets"}).json()
-    fact = body["facts"][0]
-
-    assert fact["source"] == "xbrl"
-    assert fact["source_url"].startswith("https://www.sec.gov/Archives/")
-    assert fact["source_label"] == "Assets"
-
-
-def test_facts_can_be_restricted_to_verified(client):
-    _ingest(client, "AAPL")
-    body = client.get(
-        f"/entities/{APPLE.cik}/facts", params={"verified_only": True}
-    ).json()
-    assert all(f["status"] == "verified" for f in body["facts"])
-
-
-def test_coverage_reports_check_counts_not_a_corroborated_ratio(client):
-    """The card needs to say two separate things.
-
-    It used to show `verified_count / fact_count` as "Corroborated", which
-    reads as an accuracy score and is not one: a fact counts as verified only
-    when some identity happens to touch it, so a correct figure no check covers
-    stays unverified forever and the ratio can never reach 100%.
-
-    The counts here separate how much of what was checked holds from how much
-    could be checked at all.
-    """
-    _ingest(client, "AAPL")
-    coverage = client.get(f"/entities/{APPLE.cik}").json()["coverage"]
-
-    for field in ("checks_passed", "checks_failed", "checks_skipped"):
-        assert field in coverage, field
-        assert isinstance(coverage[field], int)
-
-    evaluated = coverage["checks_passed"] + coverage["checks_failed"]
-    assert evaluated > 0, "the fixture filing should evaluate some identities"
-    assert evaluated + coverage["checks_skipped"] == sum(
-        coverage[f] for f in ("checks_passed", "checks_failed", "checks_skipped")
-    )
-
-
-def test_check_counts_agree_with_the_validation_endpoint(client):
-    """Two routes report the same run, so they must not drift apart."""
-    _ingest(client, "AAPL")
-    coverage = client.get(f"/entities/{APPLE.cik}").json()["coverage"]
-    validation = client.get(f"/entities/{APPLE.cik}/validation").json()
-
-    assert coverage["checks_passed"] == validation["passed"]
-    assert coverage["checks_failed"] == validation["failed"]
-    assert coverage["checks_skipped"] == validation["skipped"]

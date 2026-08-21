@@ -1,11 +1,4 @@
-import type {
-  AsFiledStatement,
-  Comparison,
-  Entity,
-  FilingIndex,
-  Registrant,
-  Validation,
-} from "./types";
+import type { AsFiledStatement, Comparison, Entity, FilingIndex, Registrant } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -96,9 +89,6 @@ export const api = {
       params: { tickers: tickers.join(","), form },
       signal,
     }),
-
-  validation: (cik: number, status?: string, signal?: AbortSignal) =>
-    request<Validation>(`/entities/${cik}/validation`, { params: { status }, signal }),
 };
 
 /**
