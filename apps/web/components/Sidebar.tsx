@@ -62,10 +62,10 @@ export function Sidebar({
 
   return (
     <aside className="flex h-full w-[248px] flex-col border-r border-hairline bg-void">
-      <div className="flex items-center gap-1 px-4 pb-3 pt-4">
-        <span className="flex-1 truncate text-[12.5px] font-semibold tracking-[-0.02em] text-ink">
-          fin-agentic
-        </span>
+      {/* Just the collapse control, pushed to the edge. A wordmark here would
+          name the product to the one person who already knows what they
+          opened, and it is the first thing the eye lands on. */}
+      <div className="flex items-center justify-end px-3 pb-2 pt-3">
         <IconButton label="Hide the sidebar" onClick={onCollapse}>
           <path
             d="M7.5 2.5l-3.5 3.5 3.5 3.5"
