@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ABSENT, buildRows, cellProvenance, formatMetric, periodCaption } from "./comparison";
+import {
+  ABSENT,
+  buildRows,
+  cellProvenance,
+  compareLabel,
+  formatMetric,
+  periodCaption,
+} from "./comparison";
 import type { Comparison, CompanyMetrics, MetricDescriptor, MetricValue } from "./types";
 
 /** The row for a metric, asserting it exists rather than indexing blindly. */
@@ -176,4 +183,32 @@ test("the column caption says which period the column covers", () => {
   // columns are not the same twelve months and the reader must see that.
   assert.equal(periodCaption("2025-09-27"), "2025-09-27");
   assert.equal(periodCaption(null), "period unknown");
+});
+
+// ---------------------------------------------------------------------------
+// the compare control
+// ---------------------------------------------------------------------------
+
+test("one company is nothing to compare", () => {
+  assert.equal(compareLabel(["AAPL"], null), null);
+  assert.equal(compareLabel([], null), null);
+});
+
+test("two companies and no comparison offers to build one", () => {
+  assert.equal(compareLabel(["AAPL", "MSFT"], null), "Compare 2 companies");
+});
+
+test("a comparison of exactly what is on the board leaves nothing to click", () => {
+  // Otherwise "Compare 2 companies" sits above the comparison of those two
+  // companies, reading as though the click never landed.
+  assert.equal(compareLabel(["AAPL", "MSFT"], ["AAPL", "MSFT"]), null);
+  assert.equal(compareLabel(["AAPL", "MSFT"], ["MSFT", "AAPL"]), null);
+});
+
+test("a company added since the comparison was built makes it an update", () => {
+  assert.equal(compareLabel(["AAPL", "MSFT", "NVDA"], ["AAPL", "MSFT"]), "Update comparison");
+});
+
+test("a company removed since the comparison was built also makes it an update", () => {
+  assert.equal(compareLabel(["AAPL", "MSFT"], ["AAPL", "MSFT", "NVDA"]), "Update comparison");
 });

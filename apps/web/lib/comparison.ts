@@ -86,3 +86,24 @@ export function cellProvenance(company: string, cell: Cell): string | undefined 
 export function periodCaption(periodEnd: string | null): string {
   return periodEnd ?? "period unknown";
 }
+
+/**
+ * What the board's compare control should say, or nothing at all.
+ *
+ * A comparison already showing exactly the companies on the board leaves the
+ * control with nothing to do, so it goes away -- "Compare 2 companies" sitting
+ * above the comparison of those two companies reads as though the click never
+ * landed. Adding or removing a company brings it back as an update, because
+ * the panel is now out of date with the board it summarises.
+ */
+export function compareLabel(
+  board: readonly string[],
+  compared: readonly string[] | null,
+): string | null {
+  if (board.length < 2) return null;
+  if (compared === null) return `Compare ${board.length} companies`;
+
+  const same =
+    compared.length === board.length && new Set([...board, ...compared]).size === board.length;
+  return same ? null : "Update comparison";
+}

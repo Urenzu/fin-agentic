@@ -80,7 +80,25 @@ export function Workspace() {
 
   return (
     <div className="flex h-full w-full">
-      {state.sidebar && (
+      {/* The sidebar slides rather than vanishing: it is the one thing on
+          screen that says where you are, and having it blink out makes the
+          board look like it reloaded. Held at its full width inside a wrapper
+          that shrinks, so the rows keep their layout instead of reflowing
+          narrower and narrower on the way out. `inert` because a control
+          nobody can see must not still be reachable by tab. */}
+      <div
+        inert={!state.sidebar}
+        className={`h-full shrink-0 overflow-hidden ${
+          // Not on the first paint: the server renders with the sidebar
+          // showing, and a stored preference to hide it would otherwise
+          // animate shut in front of the reader every time they load.
+          // Shortened rather than dropped under reduced motion: sliding is
+          // what tells the reader the sidebar went somewhere it can come back
+          // from, and a 200ms width change is not the kind of movement that
+          // setting is protecting anyone from.
+          ready ? "transition-[width] duration-200 ease-out motion-reduce:duration-75" : ""
+        } ${state.sidebar ? "w-[248px]" : "w-0"}`}
+      >
         <Sidebar
           canvases={canvases}
           selected={current.id}
@@ -101,9 +119,9 @@ export function Workspace() {
           onRemove={onRemove}
           onCollapse={() => setSidebar(false)}
         />
-      )}
+      </div>
       <div className="relative min-w-0 flex-1">
-        {!state.sidebar && <SidebarHandle onExpand={() => setSidebar(true)} />}
+        <SidebarHandle shown={!state.sidebar} onExpand={() => setSidebar(true)} />
         {/* Keyed on the canvas, so choosing one builds a fresh board rather
             than asking the old one to unpick itself. */}
         <Board key={current.id} snapshot={current.nodes} onSnapshot={onSnapshot} />

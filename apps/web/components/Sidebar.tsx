@@ -35,15 +35,37 @@ export function Sidebar({
 }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+
+  // One ordering, split for display. `ordered` already puts pinned first, so
+  // the headings describe the list rather than imposing a second sort on it.
   const visible = ordered(canvases, query);
+  const pinned = visible.filter((canvas) => canvas.pinned);
+  const rest = visible.filter((canvas) => !canvas.pinned);
+
+  const row = (canvas: Canvas) => (
+    <Row
+      key={canvas.id}
+      canvas={canvas}
+      active={canvas.id === selected}
+      editing={editing === canvas.id}
+      onSelect={() => onSelect(canvas.id)}
+      onStartRename={() => setEditing(canvas.id)}
+      onRename={(name) => {
+        onRename(canvas.id, name);
+        setEditing(null);
+      }}
+      onCancelRename={() => setEditing(null)}
+      onTogglePin={() => onTogglePin(canvas.id)}
+      onRemove={() => onRemove(canvas.id)}
+    />
+  );
 
   return (
-    <aside className="flex h-full w-[232px] shrink-0 flex-col border-r border-hairline bg-void">
-      <div className="flex items-center gap-1 px-3 pb-2 pt-3">
-        <span className="eyebrow flex-1 text-[9px] text-ink-faint">Canvases</span>
-        <IconButton label="New canvas" onClick={onCreate}>
-          <path d="M6 2v8M2 6h8" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-        </IconButton>
+    <aside className="flex h-full w-[248px] flex-col border-r border-hairline bg-void">
+      <div className="flex items-center gap-1 px-4 pb-3 pt-4">
+        <span className="flex-1 truncate text-[12.5px] font-semibold tracking-[-0.02em] text-ink">
+          fin-agentic
+        </span>
         <IconButton label="Hide the sidebar" onClick={onCollapse}>
           <path
             d="M7.5 2.5l-3.5 3.5 3.5 3.5"
@@ -55,56 +77,75 @@ export function Sidebar({
         </IconButton>
       </div>
 
-      <div className="px-3 pb-2">
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search canvases or tickers"
-          aria-label="Search canvases"
-          className="w-full rounded-lg border border-hairline bg-surface px-2.5 py-[6px] text-[11.5px] text-ink outline-none transition placeholder:text-ink-faint focus:border-hairline-strong"
-        />
+      <div className="flex flex-col gap-1.5 px-3">
+        <div className="relative">
+          <svg
+            viewBox="0 0 12 12"
+            aria-hidden
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-ink-faint"
+            stroke="currentColor"
+            fill="none"
+          >
+            <circle cx="5" cy="5" r="3.2" strokeWidth="1.2" />
+            <path d="M7.4 7.4L10 10" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search"
+            aria-label="Search canvases"
+            className="w-full rounded-lg border border-transparent bg-white/[0.04] py-[7px] pl-[30px] pr-2.5 text-[12px] text-ink outline-none transition placeholder:text-ink-faint hover:bg-white/[0.06] focus:border-hairline-strong focus:bg-surface"
+          />
+        </div>
+
+        {/* A labelled row rather than a bare `+`: it is the one thing a reader
+            with no canvases yet needs to find, and an icon makes them guess. */}
+        <button
+          type="button"
+          onClick={onCreate}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[12px] text-ink-muted transition hover:bg-white/[0.06] hover:text-ink"
+        >
+          <svg viewBox="0 0 12 12" aria-hidden className="h-3 w-3" stroke="currentColor">
+            <path d="M6 2v8M2 6h8" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+          </svg>
+          New canvas
+        </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3 pt-2">
         {visible.length === 0 && (
-          <p className="px-2 py-3 text-[11px] leading-relaxed text-ink-faint">
+          <p className="px-2.5 py-3 text-[11.5px] leading-relaxed text-ink-faint">
             {/* Says which of the two situations this is: an empty shelf reads
                 very differently from a search that found nothing. */}
             {query.trim() === "" ? "No canvases yet." : `Nothing matches “${query.trim()}”.`}
           </p>
         )}
 
-        {visible.map((canvas) => (
-          <Row
-            key={canvas.id}
-            canvas={canvas}
-            active={canvas.id === selected}
-            editing={editing === canvas.id}
-            onSelect={() => onSelect(canvas.id)}
-            onStartRename={() => setEditing(canvas.id)}
-            onRename={(name) => {
-              onRename(canvas.id, name);
-              setEditing(null);
-            }}
-            onCancelRename={() => setEditing(null)}
-            onTogglePin={() => onTogglePin(canvas.id)}
-            onRemove={() => onRemove(canvas.id)}
-          />
-        ))}
+        {/* Headings only once there is a pinned canvas to head. With none, a
+            lone "Recent" label over the whole list says nothing. */}
+        {pinned.length > 0 && <Heading>Pinned</Heading>}
+        {pinned.map(row)}
+        {pinned.length > 0 && rest.length > 0 && <Heading>Recent</Heading>}
+        {rest.map(row)}
       </div>
     </aside>
   );
 }
 
 /** The control that brings the sidebar back, shown only while it is away. */
-export function SidebarHandle({ onExpand }: { onExpand: () => void }) {
+export function SidebarHandle({ shown, onExpand }: { shown: boolean; onExpand: () => void }) {
   return (
     <button
       type="button"
       onClick={onExpand}
       aria-label="Show the sidebar"
       title="Show the sidebar"
-      className="panel absolute left-3 top-3 z-20 rounded-lg border border-hairline p-1.5 text-ink-faint transition hover:border-hairline-strong hover:text-ink"
+      // Kept mounted so it can fade rather than blink, and held back until the
+      // sidebar has finished sliding out of the space it appears in.
+      inert={!shown}
+      className={`panel absolute left-3 top-3 z-20 rounded-lg border border-hairline p-1.5 text-ink-faint transition-opacity duration-150 hover:border-hairline-strong hover:text-ink motion-reduce:duration-75 ${
+        shown ? "opacity-100 delay-150" : "pointer-events-none opacity-0"
+      }`}
     >
       <svg viewBox="0 0 12 12" aria-hidden className="h-3 w-3">
         <path
@@ -117,6 +158,12 @@ export function SidebarHandle({ onExpand }: { onExpand: () => void }) {
         />
       </svg>
     </button>
+  );
+}
+
+function Heading({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="eyebrow px-2.5 pb-1 pt-2 text-[8.5px] text-ink-faint first:pt-0">{children}</p>
   );
 }
 
@@ -169,10 +216,19 @@ function Row({
 
   return (
     <div
-      className={`group relative rounded-lg transition ${
-        active ? "bg-white/[0.06]" : "hover:bg-white/[0.035]"
+      className={`group relative rounded-lg transition-colors ${
+        active ? "bg-white/[0.07]" : "hover:bg-white/[0.035]"
       }`}
     >
+      {/* The selected canvas gets a mark down its edge as well as a fill: at
+          these contrasts a fill alone is easy to lose against a hover. */}
+      <span
+        aria-hidden
+        className={`absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-ink transition-opacity ${
+          active ? "opacity-100" : "opacity-0"
+        }`}
+      />
+
       {editing ? (
         <RenameField initial={canvas.name} onCommit={onRename} onCancel={onCancelRename} />
       ) : (
@@ -184,34 +240,15 @@ function Row({
           onDoubleClick={onStartRename}
           className="block w-full py-[7px] pl-2.5 pr-8 text-left"
         >
-          <span className="flex items-center gap-1.5">
-            {canvas.pinned && (
-              // A small mark rather than a filled control: pinned is a
-              // property of the canvas, and the way to change it is the menu.
-              <svg
-                viewBox="0 0 12 12"
-                aria-label="Pinned"
-                role="img"
-                className="h-[9px] w-[9px] shrink-0 text-ink-faint"
-              >
-                <path
-                  d="M4.6 1.5h2.8l-.4 3 1.7 1.6H3.3L5 4.5l-.4-3M6 6.1V10.5"
-                  stroke="currentColor"
-                  strokeWidth="1.1"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  fill="currentColor"
-                />
-              </svg>
-            )}
-            <span className={`truncate text-[12px] ${active ? "text-ink" : "text-ink-muted"}`}>
-              {canvas.name}
-            </span>
+          <span
+            className={`block truncate text-[12.5px] ${active ? "text-ink" : "text-ink-muted"}`}
+          >
+            {canvas.name}
           </span>
-          <span className="eyebrow tnum mt-[2px] block truncate text-[8.5px] text-ink-faint">
+          <span className="tnum mt-[1px] block truncate text-[10px] text-ink-faint">
             {/* What is actually on it, which is how a reader recognises a
                 canvas they never got round to naming. */}
-            {tickers.length > 0 ? tickers.join(" · ") : "empty"}
+            {tickers.length > 0 ? tickers.join(" · ") : "Empty"}
           </span>
         </button>
       )}
@@ -264,7 +301,7 @@ function RenameField({
         if (event.key === "Escape") onCancel();
       }}
       aria-label="Canvas name"
-      className="w-full rounded-lg border border-hairline-strong bg-surface px-2.5 py-[7px] text-[12px] text-ink outline-none"
+      className="w-full rounded-lg border border-hairline-strong bg-surface px-2.5 py-[7px] text-[12.5px] text-ink outline-none"
     />
   );
 }

@@ -125,12 +125,6 @@ body {
   border-color: var(--color-hairline-strong);
 }
 
-.react-flow__attribution {
-  background: transparent;
-  color: #3a3a42;
-  font-size: 10px;
-}
-
 .react-flow__controls {
   box-shadow: none;
 }

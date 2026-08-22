@@ -30,6 +30,7 @@ import { api, ApiError, waitForEntity } from "@/lib/api";
 import type { AsFiledStatement, Entity, FilingIndex, Registrant } from "@/lib/types";
 import type { CanvasNode } from "@/lib/canvas";
 import { companiesToRestore, filingsToRestore, toSnapshot } from "@/lib/canvasSnapshot";
+import { compareLabel } from "@/lib/comparison";
 import { nextCardOrigin, nextRowOrigin } from "@/lib/placement";
 import { filingKey, RequestCache } from "@/lib/prefetch";
 import { removeFromBoard } from "@/lib/removal";
@@ -381,10 +382,20 @@ function BoardInner({ snapshot, onSnapshot }: BoardProps) {
   /** Companies on the board that a comparison could be built from. */
   const comparable = useMemo(
     () =>
-      nodes.filter((node) => node.type === "entity" && node.data.entity.registrant.ticker !== "")
-        .length,
+      nodes
+        .filter((node): node is EntityNodeType => node.type === "entity")
+        .map((node) => node.data.entity.registrant.ticker)
+        .filter((ticker) => ticker !== ""),
     [nodes],
   );
+
+  /** Who the comparison on the board is already of, if there is one. */
+  const compared = useMemo(() => {
+    const panel = nodes.find((node): node is ComparisonNodeType => node.type === "comparison");
+    return panel ? panel.data.companies.map((company) => company.ticker) : null;
+  }, [nodes]);
+
+  const compareCta = compareLabel(comparable, compared);
 
   /**
    * Take a panel off the board, along with anything that depended on it.
@@ -598,7 +609,7 @@ function BoardInner({ snapshot, onSnapshot }: BoardProps) {
           nodesConnectable={false}
           minZoom={0.15}
           maxZoom={2}
-          proOptions={{ hideAttribution: false }}
+          proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={30} size={1} color="#1e1e24" />
           {!empty && (
@@ -616,15 +627,17 @@ function BoardInner({ snapshot, onSnapshot }: BoardProps) {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center pt-6">
           <div className="pointer-events-auto flex flex-col items-center gap-3">
             <TickerSearch onPick={load} busy={busy} />
-            {/* Appears only once there is something to compare. A control that
-                cannot do anything is chrome competing with the figures. */}
-            {comparable >= 2 && (
+            {/* Appears only when there is something to do: two companies and
+                no comparison, or a comparison the board has since outgrown. A
+                control that cannot change anything is chrome competing with
+                the figures. */}
+            {compareCta !== null && (
               <button
                 type="button"
                 onClick={compareBoard}
                 className="eyebrow rounded-full border border-hairline-strong bg-surface px-3 py-[5px] text-[9px] text-ink-muted transition hover:border-ink-faint hover:text-ink"
               >
-                Compare {comparable} companies
+                {compareCta}
               </button>
             )}
             {error && (
